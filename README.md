@@ -64,7 +64,7 @@ Copy `.env.example` to `.env`.
 | `ELEVENLABS_VOICE_ID` | Spoken voice. A default is used when this is empty |
 | `ELEVENLABS_MODEL_ID` | Speech model. Defaults to `eleven_flash_v2_5` |
 | `F1_PORT` | F1 UDP port. Defaults to `20777` |
-| `F1_UDP_FORMAT` | `auto`, `2024` (F1 24) or `2025` (F1 25). Defaults to `auto` |
+| `F1_UDP_FORMAT` | `auto`, or a registered format: `2024` (F1 24), `2025` (F1 25). Defaults to `auto` |
 | `GT7_PORT` | GT7 UDP port. Defaults to `33740` |
 | `ANALYSIS_INTERVAL` | Seconds between strategy updates. Defaults to `15` |
 
@@ -73,7 +73,9 @@ Copy `.env.example` to `.env`.
 | File | Role |
 | --- | --- |
 | `server.py` | FastAPI app, UDP listeners, dashboard, and radio API |
-| `f1_parser.py` | F1 24 and F1 25 UDP packet parser for all 22 cars |
+| `f1/parser.py` | F1 UDP packet parser for all 22 cars |
+| `f1/f1_24/`, `f1/f1_25/` | Per-game packet layouts, track ids, and compound ids |
+| `registry.py` | Name registry the F1 formats register into |
 | `engine_models.py` | Tire, fuel, weather, and opponent models |
 | `analyzer.py` | DeepSeek strategy and radio replies |
 | `tts_bridge.py` | ElevenLabs speech |

@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from analyzer import analyze, radio_reply
 from tts_bridge import synthesize
-from f1_parser import F1Accumulator
+from f1 import F1Accumulator
 
 load_dotenv()
 
