@@ -1,5 +1,5 @@
 """
-Telemetry → DeepSeek analysis → TTS → broadcast to frontend
+Telemetry → AI provider analysis → TTS → broadcast to frontend
 Supports: UDP (PS5) + WebSocket (simulator fallback)
 """
 import asyncio, json, time, os, webbrowser, threading, urllib.request
@@ -10,7 +10,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
-from analyzer import analyze, radio_reply
+from analyzer import analyze, radio_reply, provider
 from tts_bridge import synthesize
 from f1 import F1Accumulator
 
@@ -95,6 +95,7 @@ class F1Protocol(asyncio.DatagramProtocol):
 @asynccontextmanager
 async def lifespan(_app):
   loop = asyncio.get_running_loop()
+  print(f"AI provider: {provider.label} ({provider.model})")
   print("=== F1 UDP setup ===")
   print(f"Listening F1 telemetry on UDP {UDP_HOST}:{F1_PORT} (format: {F1_UDP_FORMAT})")
   print("On PS5 F1 24 / F1 25 Settings → Telemetry:")

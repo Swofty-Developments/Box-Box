@@ -1,9 +1,8 @@
 """
-DeepSeek real-time strategy analysis — sends all 22 cars to the AI.
+Real-time strategy analysis — sends all 22 cars to the AI provider set by AI_PROVIDER.
 Integrates physics engine models (tire, fuel, ERS, weather, opponent) for precise data.
 """
 import os, json
-from openai import OpenAI
 from dotenv import load_dotenv
 from engine_models import (
     analyze_telemetry_frame,
@@ -12,12 +11,10 @@ from engine_models import (
     FuelResult,
     OpponentThreat,
 )
+from providers import get_provider
 
 load_dotenv()
-client = OpenAI(
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url=os.getenv("DEEPSEEK_BASE_URL"),
-)
+provider = get_provider(os.getenv("AI_PROVIDER", "deepseek"))
 
 SYSTEM_PROMPT = """# F1 24 Strategy Engineer AI — System Instructions
 
@@ -175,22 +172,13 @@ def analyze(cars: list, player_idx: int, lap: int, track: dict = None) -> dict:
             f"RAW TELEMETRY:\n{json.dumps({'player_idx': player_idx, 'lap': lap, 'cars': cars}, ensure_ascii=False)}"
         )
 
-        resp = client.chat.completions.create(
-            model="deepseek-v4-flash",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
-            ],
-            response_format={"type": "json_object"},
-            timeout=60
-        )
-        result = json.loads(resp.choices[0].message.content)
+        result = provider.chat_json(SYSTEM_PROMPT, user_content, timeout=60)
         return {
             "advice": result.get("advice", ""),
             "voice": result.get("voice", ""),
         }
     except Exception as e:
-        print(f"DeepSeek analysis failed: {e}")
+        print(f"{provider.label} analysis failed: {e}")
         return {"advice": "", "voice": ""}
 
 
@@ -250,22 +238,17 @@ def radio_reply(message: str, cars: list, player_idx: int, lap: int, track: dict
     }
 
     try:
-        resp = client.chat.completions.create(
-            model="deepseek-v4-flash",
-            messages=[
-                {"role": "system", "content": RADIO_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))},
-            ],
-            response_format={"type": "json_object"},
+        result = provider.chat_json(
+            RADIO_SYSTEM_PROMPT,
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             max_tokens=60,
             temperature=0.3,
             timeout=20,
         )
-        result = json.loads(resp.choices[0].message.content)
         voice = (result.get("voice") or result.get("reply") or result.get("advice") or "").strip()
         return {"reply": voice, "voice": voice}
     except Exception as e:
-        print(f"DeepSeek radio reply failed: {e}")
+        print(f"{provider.label} radio reply failed: {e}")
         return {
             "reply": "Say again, radio copy lost.",
             "voice": "Say again, radio copy lost.",
