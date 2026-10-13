@@ -19,6 +19,7 @@ load_dotenv()
 UDP_HOST = os.getenv("UDP_HOST", "0.0.0.0")
 GT7_PORT = int(os.getenv("GT7_PORT", "33740"))
 F1_PORT = int(os.getenv("F1_PORT", "20777"))
+F1_UDP_FORMAT = os.getenv("F1_UDP_FORMAT", "auto")
 UDP_TIMEOUT = 5.0
 UDP_DEBUG = os.getenv("UDP_DEBUG", "0") == "1"
 UDP_DUMP = os.getenv("UDP_DUMP", "0") == "1"
@@ -38,7 +39,7 @@ BASE_DIR = Path(__file__).parent
 dump_dir = BASE_DIR / "udp_dump"
 _dump_count = 0
 
-f1_acc = F1Accumulator()
+f1_acc = F1Accumulator(F1_UDP_FORMAT)
 
 
 class Gt7Protocol(asyncio.DatagramProtocol):
@@ -95,8 +96,8 @@ class F1Protocol(asyncio.DatagramProtocol):
 async def lifespan(_app):
   loop = asyncio.get_running_loop()
   print("=== F1 UDP setup ===")
-  print(f"Listening F1 telemetry on UDP {UDP_HOST}:{F1_PORT}")
-  print("On PS5 F1 24 Settings → Telemetry:")
+  print(f"Listening F1 telemetry on UDP {UDP_HOST}:{F1_PORT} (format: {F1_UDP_FORMAT})")
+  print("On PS5 F1 24 / F1 25 Settings → Telemetry:")
   print("  UDP Telemetry = On")
   print("  UDP Broadcast / IP = this PC's LAN IP (same Wi‑Fi/LAN as PS5)")
   print(f"  UDP Port = {F1_PORT}")

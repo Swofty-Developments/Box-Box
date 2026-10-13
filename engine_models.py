@@ -91,7 +91,8 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _get_compound(compound_str: str) -> CompoundParams:
-    key = compound_str.upper().replace("SS", "SOFT")
+    # F1 25 C6 has no coefficients yet; C5 is the nearest compound
+    key = compound_str.upper().replace("SS", "SOFT").replace("C6", "C5")
     if key in _COMPOUND_DEFAULTS:
         return _COMPOUND_DEFAULTS[key]
     return _COMPOUND_DEFAULTS["MEDIUM"]

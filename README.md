@@ -4,7 +4,7 @@ Box-Box is an AI-powered race engineer for home sim racing. It captures real-tim
 
 ## What it does
 
-- Listens for live **F1 24** UDP telemetry and **Gran Turismo 7** JSON telemetry.
+- Listens for live **F1 24** and **F1 25** UDP telemetry and **Gran Turismo 7** JSON telemetry.
 - Models tires, fuel, ERS, weather, and nearby opponents before the strategy call.
 - Asks DeepSeek for pit-wall advice on a timed interval and speaks it with ElevenLabs.
 - Lets the driver talk back on pit radio. The engineer answers in text and voice.
@@ -36,7 +36,7 @@ venv\Scripts\python.exe server.py
 venv\Scripts\python.exe simulator.py
 ```
 
-## Connect F1 24
+## Connect F1 24 or F1 25
 
 In the game, open Settings → Telemetry:
 
@@ -44,8 +44,9 @@ In the game, open Settings → Telemetry:
 - UDP Broadcast / IP: this PC's LAN address, on the same network as the console
 - UDP Port: `20777`
 - UDP Send Rate: 20Hz or higher
+- UDP Format (F1 25): `2025` or `2024`
 
-Enter a session on track. The menus only send event packets. Gran Turismo 7 telemetry is accepted as JSON on UDP port `33740`.
+Enter a session on track. The menus only send event packets. Box-Box reads the format from each packet's header. Set `F1_UDP_FORMAT` to `2024` or `2025` to force one layout. Gran Turismo 7 telemetry is accepted as JSON on UDP port `33740`.
 
 ## Pit radio
 
@@ -62,7 +63,8 @@ Copy `.env.example` to `.env`.
 | `ELEVENLABS_API_KEY` | ElevenLabs key used for pit-radio voice |
 | `ELEVENLABS_VOICE_ID` | Spoken voice. A default is used when this is empty |
 | `ELEVENLABS_MODEL_ID` | Speech model. Defaults to `eleven_flash_v2_5` |
-| `F1_PORT` | F1 24 UDP port. Defaults to `20777` |
+| `F1_PORT` | F1 UDP port. Defaults to `20777` |
+| `F1_UDP_FORMAT` | `auto`, `2024` (F1 24) or `2025` (F1 25). Defaults to `auto` |
 | `GT7_PORT` | GT7 UDP port. Defaults to `33740` |
 | `ANALYSIS_INTERVAL` | Seconds between strategy updates. Defaults to `15` |
 
@@ -71,7 +73,7 @@ Copy `.env.example` to `.env`.
 | File | Role |
 | --- | --- |
 | `server.py` | FastAPI app, UDP listeners, dashboard, and radio API |
-| `f1_parser.py` | F1 24 UDP packet parser for all 22 cars |
+| `f1_parser.py` | F1 24 and F1 25 UDP packet parser for all 22 cars |
 | `engine_models.py` | Tire, fuel, weather, and opponent models |
 | `analyzer.py` | DeepSeek strategy and radio replies |
 | `tts_bridge.py` | ElevenLabs speech |

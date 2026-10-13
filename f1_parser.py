@@ -1,10 +1,10 @@
 """
-F1 24 UDP parser — all 22 cars (official PacketHeader / payload layout).
+F1 24 / F1 25 UDP parser — all 22 cars (official PacketHeader / payload layout).
 """
 import math
 import struct
 
-# F1 23/24 header: format, year, maj, min, packetVer, packetId, sessionUID, ...
+# F1 23/24/25 header: format, year, maj, min, packetVer, packetId, sessionUID, ...
 HEADER_FMT = struct.Struct("<HBBBBBQfIIBB")
 HEADER_SIZE = HEADER_FMT.size  # 29
 
@@ -20,9 +20,16 @@ CAR_STATUS_COMPOUND_OFFSET = 25  # m_actualTyreCompound
 CAR_STATUS_ERS_OFFSET = 37  # m_ersStoreEnergy (Joules)
 ERS_MAX_J = 4_000_000.0
 
-CAR_DMG_CAR_SIZE = 42  # float[4] wear + uint8 fields (packed)
 CAR_DMG_WEAR_OFFSET = 0  # 4 × float percentage
-CAR_DMG_FRONT_WING_OFFSET = 24  # after wear(16)+tyreDmg(4)+brakeDmg(4)
+
+# Per-car entries that changed size in F1 25; every other packet is identical.
+# 2025 participants: name cut to 32 chars, 4 RGB livery colours appended.
+# 2025 car damage: tyreBlisters[4] inserted after brakesDamage[4].
+UDP_LAYOUTS = {
+  2024: {"participant_size": 60, "name_len": 48, "dmg_size": 42, "dmg_front_wing": 24},
+  2025: {"participant_size": 57, "name_len": 32, "dmg_size": 46, "dmg_front_wing": 28},
+}
+UDP_FORMATS = ("auto", "2024", "2025")
 
 # F1 24 LapData is 57 bytes (lastLap/currentLap are uint32 ms)
 LAP_DATA_CAR_SIZE = 57
@@ -30,12 +37,12 @@ LAP_DATA_CAR_SIZE = 57
 # Wheel arrays in every packet are ordered RL, RR, FL, FR
 _wheel_map = ["RL", "RR", "FL", "FR"]
 
-# F1 24 actual compound ids
+# F1 24 / F1 25 actual compound ids
 COMPOUND_NAMES = {
   7: "INTER", 8: "WET",
   9: "DRY", 10: "WET",
   11: "SS", 12: "S", 13: "M", 14: "H", 15: "WET",
-  16: "C5", 17: "C4", 18: "C3", 19: "C2", 20: "C1", 21: "C0",
+  16: "C5", 17: "C4", 18: "C3", 19: "C2", 20: "C1", 21: "C0", 22: "C6",
   0: "C0", 1: "C1", 2: "C2", 3: "C3", 4: "C4", 5: "C5",
   6: "SOFT",
 }
@@ -47,7 +54,8 @@ TRACK_NAMES = {
   12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "Austin",
   16: "Interlagos", 17: "Red Bull Ring", 19: "Mexico City", 20: "Baku",
   26: "Zandvoort", 27: "Imola", 29: "Jeddah", 30: "Miami",
-  31: "Las Vegas", 32: "Losail",
+  31: "Las Vegas", 32: "Losail", 39: "Silverstone Reverse",
+  40: "Red Bull Ring Reverse", 41: "Zandvoort Reverse",
 }
 
 # Packet IDs that update on-track car state enough to refresh the UI
@@ -55,7 +63,11 @@ _UI_PACKET_IDS = {0, 2, 4, 6, 7, 10}
 
 
 class F1Accumulator:
-  def __init__(self):
+  def __init__(self, udp_format: str = "auto"):
+    udp_format = str(udp_format).strip().lower()
+    if udp_format not in UDP_FORMATS:
+      raise ValueError(f"F1 UDP format must be one of {', '.join(UDP_FORMATS)}, got {udp_format!r}")
+    self.udp_format = udp_format
     self._reset()
 
   def _reset(self):
@@ -67,6 +79,7 @@ class F1Accumulator:
     self.weather = 0
     self.track_temp = 0
     self.air_temp = 0
+    self.layout = UDP_LAYOUTS[2024]
 
   def feed(self, data: bytes, player_idx: int | None = None):
     if len(data) < HEADER_SIZE:
@@ -79,9 +92,7 @@ class F1Accumulator:
       player_idx = header[10]
     self.player_idx = player_idx
 
-    if packet_format not in (2023, 2024, 2025):
-      # Still try — some builds may differ; offsets assume 23+ header
-      pass
+    self.layout = UDP_LAYOUTS[self._layout_year(packet_format)]
 
     if packet_id == 0:
       self._parse_motion(data)
@@ -107,6 +118,12 @@ class F1Accumulator:
       return None
 
     return self._build_frame()
+
+  def _layout_year(self, packet_format: int) -> int:
+    if self.udp_format != "auto":
+      return int(self.udp_format)
+    # F1 25 can also send the 2024 layout (Telemetry → UDP Format)
+    return 2025 if packet_format == 2025 else 2024
 
   def _parse_motion(self, data):
     for i in range(22):
@@ -176,13 +193,15 @@ class F1Accumulator:
   def _parse_participants(self, data):
     if len(data) < HEADER_SIZE + 1:
       return
+    size = self.layout["participant_size"]
+    name_len = self.layout["name_len"]
     for i in range(22):
-      offset = HEADER_SIZE + 1 + i * 60
-      if offset + 60 > len(data):
+      offset = HEADER_SIZE + 1 + i * size
+      if offset + size > len(data):
         break
       race_number = data[offset + 5]
-      raw_name = data[offset + 7: offset + 7 + 48]
-      name = raw_name.decode("utf-8", errors="ignore").strip("\x00").strip()
+      raw_name = data[offset + 7: offset + 7 + name_len].split(b"\x00", 1)[0]
+      name = raw_name.decode("utf-8", errors="ignore").strip()
       car = self.cars.setdefault(i, {})
       car["raceNumber"] = race_number
       if name:
@@ -225,11 +244,13 @@ class F1Accumulator:
       car["ersBattery"] = round(max(0.0, min(100.0, (ers_j / ERS_MAX_J) * 100.0)), 1)
 
   def _parse_car_damage(self, data):
+    size = self.layout["dmg_size"]
+    wing = self.layout["dmg_front_wing"]
     for i in range(22):
-      offset = HEADER_SIZE + i * CAR_DMG_CAR_SIZE
-      if offset + CAR_DMG_CAR_SIZE > len(data):
-        # F1 24 size is 42; accept slightly shorter if trailing fields missing
-        if offset + 26 > len(data):
+      offset = HEADER_SIZE + i * size
+      if offset + size > len(data):
+        # accept slightly shorter if trailing fields missing
+        if offset + wing + 2 > len(data):
           continue
       car = self.cars.setdefault(i, {})
       if offset + 16 <= len(data):
@@ -237,9 +258,9 @@ class F1Accumulator:
         car["tireWear"] = {
           _wheel_map[j]: round(wears[j], 1) for j in range(4)
         }
-      if offset + CAR_DMG_FRONT_WING_OFFSET + 2 <= len(data):
-        fl = data[offset + CAR_DMG_FRONT_WING_OFFSET]
-        fr = data[offset + CAR_DMG_FRONT_WING_OFFSET + 1]
+      if offset + wing + 2 <= len(data):
+        fl = data[offset + wing]
+        fr = data[offset + wing + 1]
         car["damage"] = max(fl, fr)
 
   def _build_frame(self):
