@@ -61,7 +61,7 @@ Copy `.env.example` to `.env`.
 | `AI_PROVIDER` | `deepseek` or `cerebras`. Defaults to `deepseek` |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_MODEL` | DeepSeek model. Defaults to `deepseek-v4-flash` |
-| `DEEPSEEK_THINKING` | `enabled` or `disabled`. Unset uses the API default, which thinks |
+| `DEEPSEEK_REASONING_EFFORT` | `none` (thinking off), `low`, `high` or `max`. Defaults to `low` |
 | `DEEPSEEK_BASE_URL` | OpenAI-compatible API base URL. Defaults to `https://api.deepseek.com` |
 | `CEREBRAS_API_KEY` | Cerebras API key |
 | `CEREBRAS_MODEL` | Cerebras model. Defaults to `qwen-3.8-27b` |
