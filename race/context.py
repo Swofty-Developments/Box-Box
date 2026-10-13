@@ -250,15 +250,18 @@ def strategy_context(state, memory, reasons) -> str:
 
 
 def radio_context(state, memory, message: str) -> str:
-    now, green, _ = _loss_now(state)
-    plan_result = planner.plan(state, now, green, memory.plan)
+    if state.is_race():
+        now, green, _ = _loss_now(state)
+        strategy = _pit_block(state, planner.plan(state, now, green, memory.plan))
+    else:
+        strategy = [f"{state.track.get('sessionType') or 'This session'} is not a race: talk pace, tyres and the car, not race strategy."]
     sections = [
         f'DRIVER SAYS: "{message}"',
         *_race_header(state),
         *_player_block(state),
         *_neighbours(state),
         *_teammate(state),
-        *_pit_block(state, plan_result),
+        *strategy,
         "RECENT RACE LOG:",
         *[f"  L{e['lap']}: {e['text']}" for e in state.log[-12:]],
         "MEMORY:",
