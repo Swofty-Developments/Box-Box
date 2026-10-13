@@ -16,5 +16,8 @@ class F1Format:
   name_len: int  # m_name length inside ParticipantData
   damage_size: int  # bytes per CarDamageData
   damage_front_wing: int  # m_frontLeftWingDamage offset inside CarDamageData
+  retirement_has_reason: bool  # RTMT event carries a reason byte after vehicleIdx
+  participant_livery: int | None  # m_numColours offset inside ParticipantData; None = no livery colours
   tracks: dict[int, str]
   compounds: dict[int, str]  # m_actualTyreCompound ids
+  teams: dict[int, str]  # m_teamId ids

@@ -22,6 +22,19 @@ COMPOUNDS = {
   6: "SOFT",
 }
 
+F1_TEAMS = {
+  0: "Mercedes", 1: "Ferrari", 2: "Red Bull Racing", 3: "Williams",
+  4: "Aston Martin", 5: "Alpine", 6: "RB", 7: "Haas", 8: "McLaren", 9: "Sauber",
+  41: "F1 Generic", 104: "F1 Custom Team",
+}
+
+TEAMS = {
+  **F1_TEAMS,
+  143: "ART GP '23", 144: "Campos '23", 145: "Carlin '23", 146: "PHM '23",
+  147: "DAMS '23", 148: "Hitech '23", 149: "MP Motorsport '23", 150: "Prema '23",
+  151: "Trident '23", 152: "Van Amersfoort Racing '23", 153: "Virtuosi '23",
+}
+
 F1_24 = FORMATS.add("2024", F1Format(
   packet_format=2024,
   game="F1 24",
@@ -29,6 +42,9 @@ F1_24 = FORMATS.add("2024", F1Format(
   name_len=48,
   damage_size=42,
   damage_front_wing=24,  # after tyresWear[4] floats, tyresDamage[4], brakesDamage[4]
+  retirement_has_reason=False,
+  participant_livery=None,
   tracks=TRACKS,
   compounds=COMPOUNDS,
+  teams=TEAMS,
 ))
