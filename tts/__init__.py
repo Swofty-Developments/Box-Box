@@ -28,6 +28,8 @@ provider: TtsProvider = TTS_PROVIDERS.get(os.getenv("TTS_PROVIDER", "elevenlabs"
 PLAY_COMMAND = os.getenv("AUDIO_PLAY_COMMAND", "").strip()
 _play_argv = shlex.split(PLAY_COMMAND, posix=os.name != "nt") if PLAY_COMMAND else []
 _play_lock = asyncio.Lock()
+_play_tasks = set()
+_playing = None
 
 
 def describe() -> str:
@@ -42,16 +44,31 @@ def plays_locally() -> bool:
 
 async def play(url: str):
     """Play one line on this machine, after any line already playing."""
+    global _playing
     path = str(AUDIO_DIR / url.rsplit("/", 1)[-1])
-    async with _play_lock:
-        try:
-            proc = await asyncio.create_subprocess_exec(
+    task = asyncio.current_task()
+    _play_tasks.add(task)
+    try:
+        async with _play_lock:
+            _playing = await asyncio.create_subprocess_exec(
                 *[arg.replace("{file}", path) for arg in _play_argv],
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
             )
-            await proc.wait()
-        except Exception as e:
-            print(f"Audio playback failed: {e}")
+            await _playing.wait()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"Audio playback failed: {e}")
+    finally:
+        _play_tasks.discard(task)
+
+
+def stop():
+    """Drop every queued line and cut the one playing, so a new session starts silent."""
+    for task in list(_play_tasks):
+        task.cancel()
+    if _playing is not None and _playing.returncode is None:
+        _playing.kill()
 
 
 def cleanup_old_audio():

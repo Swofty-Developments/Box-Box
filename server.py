@@ -200,7 +200,7 @@ async def _strategy_loop():
 
 
 async def process_frame(data: dict, source: str):
-  global _last_udp_time, _fallback
+  global _last_udp_time, _fallback, _last_advice
 
   if source == "udp":
     _last_udp_time = time.time()
@@ -215,6 +215,8 @@ async def process_frame(data: dict, source: str):
   if new_session:
     memory.reset_race()
     _pending.clear()
+    _last_advice = ""
+    tts.stop()
     print(f"New session {race_state.session_uid or '(no id)'}: race memory cleared")
 
   await _broadcast({
