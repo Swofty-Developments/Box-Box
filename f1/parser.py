@@ -434,6 +434,8 @@ class F1Accumulator:
       event = {"code": "TEAMMATE_PIT", "car": detail[0], "detail": ""}
     elif code == "CHQF":
       event = {"code": "CHEQUERED_FLAG", "car": -1, "detail": ""}
+    elif code == "LGOT":
+      event = {"code": "LIGHTS_OUT", "car": -1, "detail": ""}
     elif code == "COLL" and len(detail) >= 2:
       text = f"with {detail[1]}"
       if self.format.events.collision_severity and len(detail) >= 3:

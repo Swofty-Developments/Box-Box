@@ -112,6 +112,7 @@ class RaceState:
         self.player_damage = {"wing": 0, "body": 0, "tyre": 0}
         self.player_penalties = 0
         self.started = False
+        self.lights_out = False
         self.finished = False
 
     def is_race(self) -> bool:
@@ -179,9 +180,14 @@ class RaceState:
 
         if not self.is_race() or was_finished:
             return [], new_session
-        if not self.started and self.lap >= 1 and self.player():
+        # The race is under way at lights out, or already running when Box-Box joins it
+        if not self.started and self.player() and (self.lights_out or self.lap >= 2):
             self.started = True
-            triggers.insert(0, Trigger("RACE_START", f"lap {self.lap} of {self.total_laps() or '?'}"))
+            detail = (
+                f"lights out seconds ago, lap 1 of {self.total_laps() or '?'}; too early to judge the start"
+                if self.lights_out else f"joined a race already on lap {self.lap} of {self.total_laps() or '?'}"
+            )
+            triggers.insert(0, Trigger("RACE_START", detail))
         return triggers, new_session
 
     def _update_safety_car(self, triggers: list):
@@ -247,6 +253,9 @@ class RaceState:
             triggers.append(Trigger("CONTACT", f"contact {detail}, check for damage"))
         elif code == "CHEQUERED_FLAG":
             self._log("Chequered flag")
+        elif code == "LIGHTS_OUT":
+            self._log("Lights out")
+            self.lights_out = True
 
     def _update_car(self, car: dict, triggers: list):
         idx = car.get("idx")

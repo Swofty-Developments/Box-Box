@@ -418,6 +418,8 @@ class RaceSim:
   # ---------- public API ----------
 
   def step(self, dt: float) -> None:
+    if self.t == 0.0:
+      self._emit("LIGHTS_OUT")
     remaining = float(dt)
     while remaining > 1e-9 and not self.finished:
       h = min(remaining, MAX_STEP_S)
