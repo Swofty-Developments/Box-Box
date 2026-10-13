@@ -27,7 +27,8 @@ CAR_DMG_FRONT_WING_OFFSET = 24  # after wear(16)+tyreDmg(4)+brakeDmg(4)
 # F1 24 LapData is 57 bytes (lastLap/currentLap are uint32 ms)
 LAP_DATA_CAR_SIZE = 57
 
-_wheel_map = ["FL", "FR", "RL", "RR"]
+# Wheel arrays in every packet are ordered RL, RR, FL, FR
+_wheel_map = ["RL", "RR", "FL", "FR"]
 
 # F1 24 actual compound ids
 COMPOUND_NAMES = {
