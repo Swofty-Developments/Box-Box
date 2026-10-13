@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from analyzer import analyze, radio_reply, provider
-from tts_bridge import synthesize
+from tts import synthesize
 from f1 import F1Accumulator
 
 load_dotenv()
