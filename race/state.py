@@ -4,6 +4,8 @@ that ask the engineer for a strategy call (every completed lap, and immediately 
 """
 from dataclasses import dataclass, field
 
+from .corners import CornerAnalysis
+
 RACE_SESSIONS = ("RACE", "UNKNOWN")
 NEUTRALISED = ("FULL", "VIRTUAL")
 WET_WEATHER = ("LIGHTRAIN", "HEAVYRAIN", "STORM")
@@ -111,6 +113,7 @@ class RaceState:
         self.rain_warned = False
         self.player_damage = {"wing": 0, "body": 0, "tyre": 0}
         self.player_penalties = 0
+        self.corners = CornerAnalysis()
         self.started = False
         self.lights_out = False
         self.finished = False
@@ -171,6 +174,7 @@ class RaceState:
 
         triggers = []
         self._update_safety_car(triggers)
+        self.corners.update(frame, self.safety_car)
         self._update_weather(triggers)
         for event in frame.get("events") or []:
             self._handle_event(event, triggers)

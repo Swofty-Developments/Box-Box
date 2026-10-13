@@ -198,6 +198,7 @@ let allCars = [];
 let playerIdx = -1;
 let selectedIdx = null;
 let currentLap = 0;
+let cornerLabels = [];
 let trackName = "";
 
 // ====== Engine Panel (client-side physics) ======
@@ -504,6 +505,23 @@ function drawMap() {
     strokeSeg(seg, 1.5 * dpr, "rgba(255,255,255,0.5)");
   }
 
+  // Corner numbers at each apex, the same numbers the engineer uses
+  ctx.font = `bold ${10 * dpr}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const corner of cornerLabels) {
+    const bucket = Math.round(corner.dist / TRACK_BUCKET_M);
+    const pt = trackPoints.get(bucket) || trackPoints.get(bucket - 1) || trackPoints.get(bucket + 1);
+    if (!pt) continue;
+    const [sx, sy] = toScreen(pt.x, pt.z);
+    ctx.fillStyle = "rgba(225,6,0,0.85)";
+    ctx.beginPath();
+    ctx.arc(sx, sy - 14 * dpr, 9 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(`C${corner.n}`, sx, sy - 14 * dpr);
+  }
+
   // Cars on track
   const dotR = Math.max(5 * dpr, 7);
   for (const c of allCars) {
@@ -774,6 +792,7 @@ function connect() {
     learnTrack();
     if (d.player_idx !== undefined) playerIdx = d.player_idx;
     if (d.lap !== undefined) currentLap = d.lap;
+    if (d.corners) cornerLabels = d.corners;
 
     populateSelect();
 

@@ -61,7 +61,7 @@ def run(args) -> dict:
 
         for text in radio.pop(state.lap, []):
             started = time.time()
-            reply = radio_call(radio_context(state, memory, text))
+            reply = radio_call(radio_context(state, memory, text, state.corners.report(state.player_idx)))
             took = time.time() - started
             memory.record_radio(state.lap, text, reply["voice"])
             calls.append({"lap": state.lap, "radio": text, "voice": reply["voice"], "remember": reply["remember"],

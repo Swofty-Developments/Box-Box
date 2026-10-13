@@ -225,6 +225,7 @@ async def process_frame(data: dict, source: str):
     "track": data.get("track", {"id": -1, "name": ""}),
     "player_idx": data.get("player_idx", -1),
     "lap": data.get("lap", 0),
+    "corners": race_state.corners.labels(),
   })
 
   if triggers:
@@ -252,7 +253,8 @@ async def api_radio(req: RadioRequest):
   if not text:
     return {"ok": False, "error": "empty message"}
 
-  context = radio_context(race_state, memory, text)
+  corners = await asyncio.to_thread(race_state.corners.report, race_state.player_idx)
+  context = radio_context(race_state, memory, text, corners)
   result = await asyncio.to_thread(radio_call, context)
   voice = reply = result["voice"]
   memory.record_radio(race_state.lap, text, voice)

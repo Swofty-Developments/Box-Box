@@ -249,7 +249,7 @@ def strategy_context(state, memory, reasons) -> str:
     return "\n".join(sections)
 
 
-def radio_context(state, memory, message: str) -> str:
+def radio_context(state, memory, message: str, corners: str = "") -> str:
     if state.is_race():
         now, green, _ = _loss_now(state)
         strategy = _pit_block(state, planner.plan(state, now, green, memory.plan))
@@ -262,6 +262,7 @@ def radio_context(state, memory, message: str) -> str:
         *_neighbours(state),
         *_teammate(state),
         *strategy,
+        *([corners] if corners else []),
         "RECENT RACE LOG:",
         *[f"  L{e['lap']}: {e['text']}" for e in state.log[-12:]],
         "MEMORY:",

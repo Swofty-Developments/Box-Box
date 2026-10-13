@@ -77,6 +77,7 @@ RADIO_PROMPT = """You are the race engineer answering the driver on team radio d
 Answer in at most 20 words of plain spoken English, direct radio style, no symbols.
 If the driver states a preference or instruction that should shape strategy (for example "I want to one-stop", "box this lap", "keep me on these tyres") or reports how the car or tyres feel (for example "the fronts are gone", "rears are overheating", "grip is coming back on the inters"), put it in remember as one short sentence in the third person ("Driver wants ...", "Driver reports ..."); otherwise remember is "".
 Never say "stay out" unless you are taking back a box call you made.
+When the driver asks about corners, where they are slow, or an opponent's weak spots, answer from CORNERS and OPPONENTS: name the corner, the time, and what is different (braking point, minimum speed, throttle, exit speed), and say whether they are actually slow there compared with the field.
 Reply with JSON only: {"voice": str, "remember": str}"""
 
 QUIET = {"advice": "", "voice": "", "box_this_lap": False, "plan": None, "note": ""}
