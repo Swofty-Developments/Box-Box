@@ -142,6 +142,15 @@ async def _broadcast(payload: dict):
       pass
 
 
+async def _speak(text: str) -> str | None:
+  """Synthesize a line; returns the URL for the dashboard, or None when it plays on this machine."""
+  url = await synthesize(text)
+  if url and tts.plays_locally():
+    asyncio.create_task(tts.play(url))
+    return None
+  return url
+
+
 def _submit(triggers: list):
   """Queue triggers; one strategy call runs at a time and absorbs everything that arrived meanwhile."""
   for t in triggers:
@@ -168,7 +177,7 @@ async def _strategy_loop():
       memory.record_call(lap, reasons, result)
       if result["advice"]:
         _last_advice = result["advice"]
-      audio_url = await synthesize(result["voice"]) if result["voice"] else None
+      audio_url = await _speak(result["voice"]) if result["voice"] else None
       if result["voice"]:
         label, color = _caption_style()
         asyncio.create_task(captions.show(result["voice"], "strategy", lap, label, color))
@@ -250,7 +259,7 @@ async def api_radio(req: RadioRequest):
   if memory.add_preference(result["remember"]):
     if race_state.is_race() and race_state.started:
       _submit([Trigger("DRIVER", result["remember"])])
-  audio_url = await synthesize(voice) if voice else None
+  audio_url = await _speak(voice) if voice else None
   label, color = _caption_style()
   asyncio.create_task(captions.show(voice, "radio", race_state.lap, label, color))
 
@@ -303,6 +312,9 @@ async def api_voice(req: VoiceRequest):
   if not audio_url:
     tts.provider.set_voice(previous)
     return {"ok": False, "error": f"{tts.provider.label} could not speak with voice {voice_id}"}
+  if tts.plays_locally():
+    asyncio.create_task(tts.play(audio_url))
+    audio_url = None
   label, color = _caption_style()
   asyncio.create_task(captions.show(line, "radio", race_state.lap, label, color))
   print(f"Voice switched to {label} ({voice_id})")
