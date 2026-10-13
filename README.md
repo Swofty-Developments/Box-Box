@@ -56,6 +56,17 @@ Enter a session on track. The menus only send event packets. Box-Box reads the f
 
 Click **MIC** or press Space to talk. Ask about tires, the pit window, gaps, or fuel. The reply is played through the page.
 
+### Push-to-talk on a wheel button or key (Linux)
+
+`radio_ptt.py` opens the radio from any key or wheel button while the game has focus. One press opens the channel with a beep, it closes when you stop talking (or on a second press), and the speech is transcribed locally with Parakeet and sent to the engineer.
+
+```sh
+python radio_ptt.py --learn   # press the button; prints PTT_DEVICE and PTT_CODE for .env
+python radio_ptt.py
+```
+
+It needs read access to `/dev/input` (the `input` group), PipeWire's `pw-record` and `pw-play`, and `numpy` and `onnx-asr` (see `requirements-ptt.txt`).
+
 The voice picker next to the mic switches the engineer's voice for the session and answers with a radio check. It lists the ElevenLabs account's voices, or the Fish Audio models in `FISH_AUDIO_REFERENCE_ID` and `FISH_AUDIO_VOICES`; "Other voice id…" takes any id. When the voice is a named person on Fish Audio, captions carry that name.
 
 Tell the engineer how you want to race, for example "I'd rather one-stop" or "keep me out, I'm saving tyres", and it makes a new strategy call with that in mind for the rest of the race. When a decision depends on how you want to race and you haven't said, it asks.
@@ -113,6 +124,9 @@ Copy `.env.example` to `.env`.
 | `TTS_PROVIDER` | `elevenlabs` or `fishaudio`. Defaults to `elevenlabs` |
 | `ELEVENLABS_API_KEY` | ElevenLabs key used for pit-radio voice |
 | `ELEVENLABS_VOICE_ID` | Spoken voice. A default is used when this is empty, and a premade voice when the voice is not in your ElevenLabs account |
+| `AUDIO_PLAY_COMMAND` | Command that plays each line on this machine instead of in the dashboard, with a `{file}` placeholder, e.g. `pw-play {file}` |
+| `PTT_DEVICE` | Input device for `radio_ptt.py`, or part of its name |
+| `PTT_CODE` | Key or button code for `radio_ptt.py` (`--learn` prints it) |
 | `CAPTIONS_URL` | Endpoint that receives each spoken line as a JSON POST |
 | `CAPTIONS_COMMAND` | Command run for each spoken line, with `{text}`, `{label}`, `{color}`, `{duration_ms}`, `{kind}` and `{lap}` placeholders |
 | `CAPTIONS_LABEL` | Fixed caption label. Defaults to the team's race engineer |
@@ -151,4 +165,5 @@ Copy `.env.example` to `.env`.
 | `captions.py` | Sends spoken lines to an external caption display |
 | `simulator.py` | Race simulator with scenarios, sent to the server over WebSocket |
 | `race_test.py` | Headless scenario runs with the engineer in the loop |
+| `radio_ptt.py` | Push-to-talk from a key or wheel button, transcribed locally |
 | `static/index.html` | Live dashboard |
