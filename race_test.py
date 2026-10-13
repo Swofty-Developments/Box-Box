@@ -69,7 +69,8 @@ def run(args) -> dict:
             print(f"  L{state.lap:>2} RADIO   driver: {text!r} -> {reply['voice']!r}"
                   + (f" [remember: {reply['remember']}]" if reply["remember"] else "") + f" ({took:.1f}s)")
             if memory.add_preference(reply["remember"]):
-                pending.append(Trigger("DRIVER", reply["remember"]))
+                pending.append(Trigger("DRIVER", f'{reply["remember"]}; you already answered on the radio ("{reply["voice"]}"), '
+                                                 f'so voice stays "" unless the plan changes or the driver must act now'))
             advance(took * args.latency_scale)
 
         if not any(t.urgent or t.code == "LAP" for t in pending):
