@@ -1,269 +1,123 @@
 """
-Real-time strategy analysis — sends all 22 cars to the AI provider set by AI_PROVIDER.
-Integrates physics engine models (tire, fuel, ERS, weather, opponent) for precise data.
+Race engineer calls to the AI provider set by AI_PROVIDER: a strategy call every lap and on race
+events, and answers to the driver's radio. The race/ package builds the text the model reads.
 """
-import os, json
+import os
 from dotenv import load_dotenv
-from engine_models import (
-    analyze_telemetry_frame,
-    format_analysis_for_llm,
-    TireResult,
-    FuelResult,
-    OpponentThreat,
-)
 from providers import get_provider
 
 load_dotenv()
 provider = get_provider(os.getenv("AI_PROVIDER", "deepseek"))
 
-ANALYSIS_SCHEMA = {
+COMPOUNDS = ["SOFT", "MEDIUM", "HARD", "INTER", "WET", "NONE"]
+
+STRATEGY_SCHEMA = {
     "type": "object",
-    "properties": {"advice": {"type": "string"}, "voice": {"type": "string"}},
-    "required": ["advice", "voice"],
+    "properties": {
+        "advice": {"type": "string"},
+        "voice": {"type": "string"},
+        "box_this_lap": {"type": "boolean"},
+        "plan": {
+            "type": "object",
+            "properties": {
+                "stops_remaining": {"type": "integer"},
+                "next_pit_lap": {"type": "integer"},
+                "next_compound": {"type": "string", "enum": COMPOUNDS},
+                "summary": {"type": "string"},
+            },
+            "required": ["stops_remaining", "next_pit_lap", "next_compound", "summary"],
+            "additionalProperties": False,
+        },
+        "note": {"type": "string"},
+    },
+    "required": ["advice", "voice", "box_this_lap", "plan", "note"],
     "additionalProperties": False,
 }
+
 RADIO_SCHEMA = {
     "type": "object",
-    "properties": {"voice": {"type": "string"}},
-    "required": ["voice"],
+    "properties": {"voice": {"type": "string"}, "remember": {"type": "string"}},
+    "required": ["voice", "remember"],
     "additionalProperties": False,
 }
 
-SYSTEM_PROMPT = """# F1 24 Strategy Engineer AI — System Instructions
+STRATEGY_PROMPT = """You are the race engineer on the pit wall for the driver of one car in a Formula 1 game race. You are called after every lap the driver completes and immediately when something happens (safety car, rain, damage, a rival's stop, a driver request). Each message gives the live race state, numbers from the team's strategy tools, the race log, and your memory of everything said so far this race.
 
-You are the pit-wall strategy engineer for F1 24. Your input is live telemetry for all cars (JSON). Your output is tactical advice for the driver, global situational awareness, and lap-time comparison.
+Deciding
+- Use only the numbers in the message. Never invent laps, gaps, wear or times; if something is unknown, say so.
+- The STRATEGY TOOL options are estimated race time from tyre and pit-loss models. They ignore track position: weigh them against the rejoin prediction (traffic, places lost, overtaking).
+- Keep one coherent plan across calls. Change it only when something new justifies it (safety car, rain, damage, a rival's stop, tyres wearing faster than planned, a driver request), and when you change it, say what changed and why. Moving the stop by a lap or two inside the tool's window is not a plan change: adjust next_pit_lap quietly. If "your plan in force" is within about 2 s of the best option, keep it: the models are estimates and a steady plan is worth more than a second.
+- Safety car or VSC: a stop costs far less (NEUTRALISED STOP shows the saving) and rivals due to stop will take it, so staying out usually loses those places later. Box if your planned stop is within roughly ten laps or the tool says boxing this lap gains time, unless it loses places you cannot recover or you already stopped recently.
+- Rain: compare FIELD PACE BY TYRE and the forecast; switch to intermediates when they are faster or rain is clearly building. When the rain stops the track stays wet for several laps: go back to slicks once cars on slicks are lapping faster than cars on intermediates, not before, unless you have nothing to lose. Every lap on the wrong tyre costs the pace difference, and places lost in that stop come back as the other cars on the wrong tyre stop too.
+- A front wing above about 30% damage, or a puncture, means box this lap.
+- If a rival around you pits, think about the undercut: cover it when your tyres are old and you would lose the place.
+- Your teammate shares your pit box. If they are close and likely to stop soon (old tyres, near the wear cliff), do not box on the same lap: offset by a lap unless a safety car makes the queue worth it. If they are in the pit lane now and you would arrive right behind them, wait a lap.
+- In a dry race the driver must use two different dry compounds unless wet tyres were used.
+- Respect what the driver has said they want unless it would clearly cost the result; if you override it, say why.
+- Ask how the tyres feel only when the answer would change a decision: nearing the pit window, while conditions change (rain, drying), or on the lap after a stop. At most once every five laps; your memory shows when you last asked.
+- What the driver tells you about the car or tyres is evidence: weigh it with the numbers.
+- If a decision depends on how the driver wants to race (two plans within a couple of seconds, risk against track position) and they have not said, ask one short question in voice and follow the safer plan until they answer. Do not ask otherwise.
+- Set box_this_lap true only when the driver must enter the pits at the end of the current lap. Never call a stop on the final lap.
+- If you already called a box earlier on this lap and still want it, keep box_this_lap true; false withdraws the call.
+- plan counts the stops still to make, including one you call this lap: with box_this_lap true, next_pit_lap is the current lap and next_compound is what goes on now. With no stop left, stops_remaining is 0, next_pit_lap 0 and next_compound "NONE".
 
----
+Talking
+The driver stays out by default; only your box call brings them in. So "stay out" and "we're not stopping" carry no information unless they take back a box call you made, and saying them anyway makes the driver doubt the plan. Talk about what matters instead.
+- voice is what you say on the radio: at most 20 words of plain spoken English, no symbols, no lap-time digit strings like 1:29.8. It is one of: a box call (start with "Box, box"), taking back your own box call ("Stay out, stay out", the only time those words are used), a plan change and why, an event that matters to this car, a useful new fact (a gap closing, a pace difference, tyre state), or a question. Otherwise voice is "": a real engineer is quiet most laps.
+  After a rival's stop, say what it means: "Leclerc has pitted, he'll come out behind us" or "Rivals have pitted, we're on plan", not "we stay out".
+  At the start or the end: "Good start, plan is one stop around lap 16" or "Last lap, bring it home".
+- Your memory lists every line you have said this race. Never say the same thing again in other words.
+- advice is for the screen: at most 80 words with the situation, the plan and why.
+- note is a short private note for your future self (what you are watching, open questions), or "".
 
-## Role
+Reply with JSON only:
+{"advice": str, "voice": str, "box_this_lap": bool, "plan": {"stops_remaining": int, "next_pit_lap": int (0 if no stop planned), "next_compound": "SOFT"|"MEDIUM"|"HARD"|"INTER"|"WET"|"NONE", "summary": str}, "note": str}"""
 
-You are the strategy brain between the driver and the team. You do not drive the car. You:
-- Analyze opponent telemetry
-- Predict tire degradation, lap-time evolution, and pit windows
-- Issue actionable tactical orders
+RADIO_PROMPT = """You are the race engineer answering the driver on team radio during a Formula 1 game race. You get the live race state, the team's strategy numbers and your memory of the race. Use only those numbers; never invent any.
+Answer in at most 20 words of plain spoken English, direct radio style, no symbols.
+If the driver states a preference or instruction that should shape strategy (for example "I want to one-stop", "box this lap", "keep me on these tyres") or reports how the car or tyres feel (for example "the fronts are gone", "rears are overheating", "grip is coming back on the inters"), put it in remember as one short sentence in the third person ("Driver wants ...", "Driver reports ..."); otherwise remember is "".
+Never say "stay out" unless you are taking back a box call you made.
+Reply with JSON only: {"voice": str, "remember": str}"""
 
-**Note**: Never say "based on my analysis" — output conclusions and orders directly.
-
----
-
-## Output Requirements
-
-Output strategy advice in the format below. **No disclaimers or meta commentary.**
-Return JSON only: {"advice": "...", "voice": "..."}. Use English in advice.
-
-### 1) Race Situation
-
-Format:
-```
-[Lap L{lap}/{total}] [session type] | {weather/track conditions}
-Pos  | Driver        | Gap  | Tyre  | Age | FL_wear | RL_wear | Trend
-P{X} | {driver}      | +{s} | {C1-5}| {n} | {x}%    | {x}%    | {↑/↓/→}
-...
-```
-
-### 2) Lap Time Comparison
-
-Format:
-```
-LAP TIME COMPARISON
-─────────────────────────────────────────────────
-Rank  Driver      L{s}    L{s-1}  L{s-2}  Best   ΔBest
-P{X}  {driver}    1:23.4  1:23.7  1:23.1  1:22.9 +0.0
-...
-─────────────────────────────────────────────────
-```
-
-If lap times are insufficient, use speed comparison:
-```
-SPEED COMPARISON (avg km/h, last lap)
-──────────────────────────────────────────────────
-Rank  Driver      S1 avg   S2 avg   S3 avg   Overall  Top Speed
-P{X}  {driver}    252      278      245      258      324
-...
-──────────────────────────────────────────────────
-```
-
-### 3) Tire Degradation Forecast
-
-Format:
-```
-TIRE DEGRADATION FORECAST
-────────────────────────────────────────────────────
-Car    Tyre  Age  Current Wear  Cliff At  Remaining Laps  Rate
-#XX    C4    8    FL:65 FR:62   90%       ~3              1.3/lap
-       └── -0.11s/lap deg | window 75-95°C | current 82°C OK
-────────────────────────────────────────────────────
-```
-
-### 4) Tactical Orders
-
-Format:
-```
-{time/lap} | Order | Rationale
-──────────────────────────────────────────────
-L{n}   | {order}              | {brief reason}
-...
-```
-
-Example:
-```
-L8/57  | BOX NOW — switch Medium | Front wear 78%, cliff in 3 laps, +0.4s/lap
-L15/57 | DEFEND P2 — DRS inside  | He gains +0.3s DRS, slow T3 exit by 0.15s
-L20/57 | Fuel save — lift per lap | 2.3kg short to finish
-```
-
----
-
-## Analysis Framework
-
-Priority order:
-```
-1. Your position (P?) and gaps
-2. Recent lap-time trend (faster or slower)
-3. Tire state: wear %, temp window, laps remaining
-4. Opponent moves: pits, compound delta, pace trend
-5. Fuel: enough to finish?
-6. External events
-```
-
----
-
-## Constraints
-
-- No filler like "based on data analysis" or "I suggest" — direct orders only
-- If data is insufficient, output `[INSUFFICIENT DATA]` and skip that section; do not invent numbers
-- Output JSON: {"advice": "...", "voice": "..."}
-  - advice: full analysis (situation/laps/tires/tactics) for the screen
-  - voice: one short order for the player only (<20 words), for TTS. Example: {"advice": "L3/57...", "voice": "BOX IN 2 LAPS, fronts 78%"}
-  - voice must only address the player car, never other drivers
-- Use English"""
+QUIET = {"advice": "", "voice": "", "box_this_lap": False, "plan": None, "note": ""}
 
 
-RADIO_SYSTEM_PROMPT = """Race engineer on live team radio. Answer the driver using the telemetry JSON.
-Rules: English only. Max 18 words. Direct radio style. No filler. No JSON keys except voice.
-Return: {"voice":"..."}
-"""
-
-
-def _slim_car(c: dict) -> dict:
-    """Minimal fields for fast radio context."""
-    if not isinstance(c, dict):
-        return {}
-    tw = c.get("tireWear") or {}
-    avg_wear = None
-    if tw:
-        avg_wear = round((tw.get("FL", 0) + tw.get("FR", 0) + tw.get("RL", 0) + tw.get("RR", 0)) / 4)
+def _plan(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    compound = str(raw.get("next_compound") or "NONE").upper()
     return {
-        "idx": c.get("idx"),
-        "name": c.get("name"),
-        "pos": c.get("position"),
-        "spd": c.get("speed"),
-        "compound": c.get("compound"),
-        "tyreAge": c.get("tyreAge", c.get("stintLaps")),
-        "wear": avg_wear,
-        "fuel": c.get("fuel"),
-        "gapA": c.get("gapToAhead"),
-        "gapB": c.get("gapToBehind", c.get("gapToNext")),
-        "gapL": c.get("gapToLeader"),
-        "drs": c.get("drs"),
-        "ers": c.get("ersBattery"),
-        "dmg": c.get("damage"),
-        "best": c.get("bestLapTime"),
+        "stops_remaining": int(raw.get("stops_remaining") or 0),
+        "next_pit_lap": int(raw.get("next_pit_lap") or 0),
+        "next_compound": compound if compound in COMPOUNDS else "NONE",
+        "summary": str(raw.get("summary") or ""),
     }
 
 
-def analyze(cars: list, player_idx: int, lap: int, track: dict = None) -> dict:
+def strategy_call(context: str) -> dict:
     try:
-        # 先运行物理模型，获取精确数据
-        track_data = track or {"weather": {}, "name": "Unknown"}
-        engine_analysis = analyze_telemetry_frame(cars, player_idx, lap, track_data)
-        engine_summary = format_analysis_for_llm(engine_analysis, cars, player_idx, lap)
-
-        # 将物理模型结果附加到用户输入
-        user_content = (
-            f"PHYSICS ENGINE ANALYSIS:\n{engine_summary}\n\n"
-            f"RAW TELEMETRY:\n{json.dumps({'player_idx': player_idx, 'lap': lap, 'cars': cars}, ensure_ascii=False)}"
-        )
-
-        result = provider.chat_json(SYSTEM_PROMPT, user_content, schema=ANALYSIS_SCHEMA, timeout=60)
-        return {
-            "advice": result.get("advice", ""),
-            "voice": result.get("voice", ""),
-        }
+        result = provider.chat_json(STRATEGY_PROMPT, context, schema=STRATEGY_SCHEMA, timeout=60)
     except Exception as e:
-        print(f"{provider.label} analysis failed: {e}")
-        return {"advice": "", "voice": ""}
-
-
-def radio_reply(message: str, cars: list, player_idx: int, lap: int, track: dict | None = None) -> dict:
-    """Answer a live driver radio call using current telemetry (latency-tuned)."""
-    message = (message or "").strip()
-    if not message:
-        return {"reply": "", "voice": ""}
-
-    cars_list = cars if isinstance(cars, list) else []
-    player = None
-    if 0 <= player_idx < len(cars_list):
-        player = cars_list[player_idx]
-    else:
-        for c in cars_list:
-            if c.get("idx") == player_idx:
-                player = c
-                break
-
-    # 运行物理模型获取精确数据
-    track_data = track or {"weather": {}, "name": "Unknown"}
-    if isinstance(track_data, dict) and "name" in track_data:
-        track_data = {"weather": {}, **track_data}
-    engine_analysis = analyze_telemetry_frame(cars_list, player_idx, lap, track_data)
-
-    # Compact standings only — full 22-car blobs slow the LLM a lot
-    slim = sorted((_slim_car(c) for c in cars_list), key=lambda x: x.get("pos") or 99)
-    payload = {
-        "msg": message,
-        "lap": lap,
-        "track": (track or {}).get("name") if isinstance(track, dict) else track,
-        "you": _slim_car(player) if player else {"idx": player_idx},
-        "field": slim[:12],
-        # 物理模型精确数据
-        "physics": {
-            "tire": {
-                "compound": engine_analysis.player_tire.compound,
-                "age": engine_analysis.player_tire.age_laps,
-                "grip": engine_analysis.player_tire.grip_factor,
-                "health": engine_analysis.player_tire.health_score,
-                "loss_s": engine_analysis.player_tire.performance_loss_s,
-                "remaining_laps": engine_analysis.player_tire.remaining_laps,
-                "deg_rate": engine_analysis.player_tire.deg_rate_s_per_lap,
-                "overheat": engine_analysis.player_tire.overheat_risk.value,
-            },
-            "fuel": {
-                "margin_laps": engine_analysis.player_fuel.fuel_margin_laps,
-                "can_push": engine_analysis.player_fuel.can_push,
-                "must_save": engine_analysis.player_fuel.must_save,
-                "effect_s": engine_analysis.player_fuel.fuel_effect_s,
-            },
-            "threats": [
-                {"name": t.name, "level": t.threat_level, "gap": t.gap_to_player, "pace_delta": t.pace_delta}
-                for t in engine_analysis.opponent_threats[:3]
-            ],
-        },
+        print(f"{provider.label} strategy call failed: {e}")
+        return dict(QUIET)
+    plan = _plan(result.get("plan"))
+    box = bool(result.get("box_this_lap")) and plan is not None and plan["next_compound"] != "NONE"
+    return {
+        "advice": str(result.get("advice") or ""),
+        "voice": str(result.get("voice") or "").strip(),
+        "box_this_lap": box,
+        "plan": plan,
+        "note": str(result.get("note") or ""),
     }
 
+
+def radio_call(context: str) -> dict:
     try:
-        result = provider.chat_json(
-            RADIO_SYSTEM_PROMPT,
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            schema=RADIO_SCHEMA,
-            max_tokens=60,
-            temperature=0.3,
-            timeout=20,
-        )
-        voice = (result.get("voice") or result.get("reply") or result.get("advice") or "").strip()
-        return {"reply": voice, "voice": voice}
+        result = provider.chat_json(RADIO_PROMPT, context, schema=RADIO_SCHEMA, max_tokens=80, temperature=0.3, timeout=20)
     except Exception as e:
         print(f"{provider.label} radio reply failed: {e}")
-        return {
-            "reply": "Say again, radio copy lost.",
-            "voice": "Say again, radio copy lost.",
-        }
+        return {"voice": "Say again, radio copy lost.", "remember": ""}
+    return {
+        "voice": str(result.get("voice") or "").strip() or "Copy.",
+        "remember": str(result.get("remember") or "").strip(),
+    }

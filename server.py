@@ -10,9 +10,13 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
-from analyzer import analyze, radio_reply, provider
+from analyzer import provider, radio_call, strategy_call
+import tts
 from tts import synthesize
+import captions
 from f1 import F1Accumulator
+from race import EngineerMemory, RaceState, Trigger, radio_context, strategy_context
+from race.teams import caption_style
 
 load_dotenv()
 
@@ -23,17 +27,16 @@ F1_UDP_FORMAT = os.getenv("F1_UDP_FORMAT", "auto")
 UDP_TIMEOUT = 5.0
 UDP_DEBUG = os.getenv("UDP_DEBUG", "0") == "1"
 UDP_DUMP = os.getenv("UDP_DUMP", "0") == "1"
-ANALYSIS_INTERVAL = float(os.getenv("ANALYSIS_INTERVAL", "15"))
 
 pit_radios = []
-_last_analysis_time = 0.0
 _last_advice = ""
 _last_udp_time = 0.0
 _fallback = False
-_last_cars = []
-_last_player_idx = -1
-_last_lap = 0
-_last_track = {"id": -1, "name": ""}
+race_state = RaceState()
+memory = EngineerMemory()
+_pending = []
+_strategy_running = False
+_active_sim = None
 
 BASE_DIR = Path(__file__).parent
 dump_dir = BASE_DIR / "udp_dump"
@@ -96,6 +99,9 @@ class F1Protocol(asyncio.DatagramProtocol):
 async def lifespan(_app):
   loop = asyncio.get_running_loop()
   print(f"AI provider: {provider.label} ({provider.model})")
+  print(f"Voice: {tts.describe()}")
+  await tts.provider.voices()
+  print(f"Captions: {captions.describe()}")
   print("=== F1 UDP setup ===")
   print(f"Listening F1 telemetry on UDP {UDP_HOST}:{F1_PORT} (format: {F1_UDP_FORMAT})")
   print("On PS5 F1 24 / F1 25 Settings → Telemetry:")
@@ -136,37 +142,56 @@ async def _broadcast(payload: dict):
       pass
 
 
-async def _run_analysis(cars: list, player_idx: int, lap: int, source: str, track: dict = None):
-  global _last_advice
+def _submit(triggers: list):
+  """Queue triggers; one strategy call runs at a time and absorbs everything that arrived meanwhile."""
+  for t in triggers:
+    if not any(p.code == t.code and p.detail == t.detail for p in _pending):
+      _pending.append(t)
+  if not _strategy_running and any(t.urgent or t.code == "LAP" for t in _pending):
+    asyncio.create_task(_strategy_loop())
+
+
+async def _strategy_loop():
+  global _strategy_running, _pending, _last_advice
+  _strategy_running = True
   try:
-    result = await asyncio.to_thread(analyze, cars, player_idx, lap, track)
-    advice = result.get("advice", "")
-    voice = result.get("voice", "")
-    _last_advice = advice
-  except Exception as e:
-    print(f"Analysis error: {e}")
-    return
-
-  audio_url = await synthesize(voice) if voice else None
-  print(f"[{source.upper()}] Analysis ({len(cars)} cars, L{lap})")
-  if advice:
-    print(advice[:200])
-
-  await _broadcast({
-    "advice": advice,
-    "voice": voice,
-    "audio_url": audio_url,
-  })
+    while any(t.urgent or t.code == "LAP" for t in _pending):
+      reasons, _pending = _pending, []
+      session, lap = race_state.session_uid, race_state.lap
+      context = strategy_context(race_state, memory, reasons)
+      started = time.time()
+      result = await asyncio.to_thread(strategy_call, context)
+      if race_state.session_uid != session:
+        continue
+      if ((race_state.player() or {}).get("pitStatus") or "NONE") != "NONE":
+        result["box_this_lap"] = False
+      memory.record_call(lap, reasons, result)
+      if result["advice"]:
+        _last_advice = result["advice"]
+      audio_url = await synthesize(result["voice"]) if result["voice"] else None
+      if result["voice"]:
+        label, color = _caption_style()
+        asyncio.create_task(captions.show(result["voice"], "strategy", lap, label, color))
+      plan = result["plan"] or {}
+      print(f"[ENGINEER] L{lap} {'/'.join(r.code for r in reasons)} in {time.time() - started:.1f}s"
+            f"{' BOX ' + plan.get('next_compound', '') if result['box_this_lap'] else ''}"
+            f" | {result['voice'] or '(quiet)'} | plan: {plan.get('summary', '')}")
+      await _broadcast({
+        "type": "strategy",
+        "lap": lap,
+        "reasons": [r.code for r in reasons],
+        "advice": result["advice"],
+        "voice": result["voice"],
+        "audio_url": audio_url,
+        "box_this_lap": result["box_this_lap"],
+        "plan": result["plan"],
+      })
+  finally:
+    _strategy_running = False
 
 
 async def process_frame(data: dict, source: str):
-  global _last_analysis_time, _last_advice, _last_udp_time, _fallback
-  global _last_cars, _last_player_idx, _last_lap, _last_track
-
-  cars = data.get("cars", [])
-  player_idx = data.get("player_idx", -1)
-  lap = data.get("lap", 0)
-  track = data.get("track", {"id": -1, "name": ""})
+  global _last_udp_time, _fallback
 
   if source == "udp":
     _last_udp_time = time.time()
@@ -177,25 +202,24 @@ async def process_frame(data: dict, source: str):
     if time.time() - _last_udp_time < UDP_TIMEOUT:
       return
 
-  _last_cars = cars
-  _last_player_idx = player_idx
-  _last_lap = lap
-  _last_track = track
+  triggers, new_session = race_state.update(data)
+  if new_session:
+    memory.reset_race()
+    _pending.clear()
+    print(f"New session {race_state.session_uid or '(no id)'}: race memory cleared")
 
   await _broadcast({
     "advice": _last_advice,
     "voice": "",
     "audio_url": None,
-    "cars": cars,
-    "track": track,
-    "player_idx": player_idx,
-    "lap": lap,
+    "cars": data.get("cars", []),
+    "track": data.get("track", {"id": -1, "name": ""}),
+    "player_idx": data.get("player_idx", -1),
+    "lap": data.get("lap", 0),
   })
 
-  now = time.time()
-  if now - _last_analysis_time >= ANALYSIS_INTERVAL:
-    _last_analysis_time = now
-    asyncio.create_task(_run_analysis(cars, player_idx, lap, source, track))
+  if triggers:
+    _submit(triggers)
 
 
 @app.get("/favicon.ico")
@@ -219,15 +243,19 @@ async def api_radio(req: RadioRequest):
   if not text:
     return {"ok": False, "error": "empty message"}
 
-  result = await asyncio.to_thread(
-    radio_reply, text, _last_cars, _last_player_idx, _last_lap, _last_track
-  )
-  reply = result.get("reply", "")
-  voice = result.get("voice", "") or reply
+  context = radio_context(race_state, memory, text)
+  result = await asyncio.to_thread(radio_call, context)
+  voice = reply = result["voice"]
+  memory.record_radio(race_state.lap, text, voice)
+  if memory.add_preference(result["remember"]):
+    if race_state.is_race() and race_state.started:
+      _submit([Trigger("DRIVER", result["remember"])])
   audio_url = await synthesize(voice) if voice else None
+  label, color = _caption_style()
+  asyncio.create_task(captions.show(voice, "radio", race_state.lap, label, color))
 
   print(f"[RADIO] Driver: {text}")
-  print(f"[RADIO] Engineer: {voice}")
+  print(f"[RADIO] Engineer: {voice}" + (f" (remembered: {result['remember']})" if result["remember"] else ""))
 
   await _broadcast({
     "type": "radio",
@@ -246,10 +274,51 @@ async def api_radio(req: RadioRequest):
   }
 
 
+def _caption_style() -> tuple[str, str]:
+  """The speaking voice's name when the voice is a known person, else the team's engineer; the team's colour."""
+  label, color = caption_style(race_state.player())
+  return tts.provider.speaker_name() or label, color
+
+
+class VoiceRequest(BaseModel):
+  id: str
+
+
+@app.get("/api/voices")
+async def api_voices():
+  return {"provider": tts.provider.label, "current": tts.provider.voice_id, "voices": await tts.provider.voices()}
+
+
+@app.post("/api/voice")
+async def api_voice(req: VoiceRequest):
+  """Switch the engineer's voice for this session and answer with a radio check in it."""
+  voice_id = (req.id or "").strip()
+  if not voice_id:
+    return {"ok": False, "error": "empty voice id"}
+  previous = tts.provider.voice_id
+  tts.provider.set_voice(voice_id)
+  await tts.provider.voices()
+  line = "Radio check. You'll hear me on this channel for the rest of the race."
+  audio_url = await synthesize(line)
+  if not audio_url:
+    tts.provider.set_voice(previous)
+    return {"ok": False, "error": f"{tts.provider.label} could not speak with voice {voice_id}"}
+  label, color = _caption_style()
+  asyncio.create_task(captions.show(line, "radio", race_state.lap, label, color))
+  print(f"Voice switched to {label} ({voice_id})")
+  return {"ok": True, "voice": voice_id, "name": label, "audio_url": audio_url}
+
+
 @app.websocket("/ws/telemetry")
 async def telemetry_ws(websocket: WebSocket):
-  global _fallback
+  global _active_sim
   await websocket.accept()
+  # Two simulators would feed two different races into one race state
+  if _active_sim is not None:
+    print("A simulator is already connected; refusing a second one")
+    await websocket.close(code=1013)
+    return
+  _active_sim = websocket
   print("Simulator connected (fallback mode)")
   try:
     async for raw in websocket.iter_text():
@@ -257,6 +326,9 @@ async def telemetry_ws(websocket: WebSocket):
       await process_frame(frame, "simulator")
   except Exception as e:
     print(f"Simulator WS error: {e}")
+  finally:
+    if _active_sim is websocket:
+      _active_sim = None
 
 
 @app.websocket("/ws/pitradio")
