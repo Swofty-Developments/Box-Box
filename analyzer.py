@@ -16,6 +16,19 @@ from providers import get_provider
 load_dotenv()
 provider = get_provider(os.getenv("AI_PROVIDER", "deepseek"))
 
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {"advice": {"type": "string"}, "voice": {"type": "string"}},
+    "required": ["advice", "voice"],
+    "additionalProperties": False,
+}
+RADIO_SCHEMA = {
+    "type": "object",
+    "properties": {"voice": {"type": "string"}},
+    "required": ["voice"],
+    "additionalProperties": False,
+}
+
 SYSTEM_PROMPT = """# F1 24 Strategy Engineer AI — System Instructions
 
 You are the pit-wall strategy engineer for F1 24. Your input is live telemetry for all cars (JSON). Your output is tactical advice for the driver, global situational awareness, and lap-time comparison.
@@ -172,7 +185,7 @@ def analyze(cars: list, player_idx: int, lap: int, track: dict = None) -> dict:
             f"RAW TELEMETRY:\n{json.dumps({'player_idx': player_idx, 'lap': lap, 'cars': cars}, ensure_ascii=False)}"
         )
 
-        result = provider.chat_json(SYSTEM_PROMPT, user_content, timeout=60)
+        result = provider.chat_json(SYSTEM_PROMPT, user_content, schema=ANALYSIS_SCHEMA, timeout=60)
         return {
             "advice": result.get("advice", ""),
             "voice": result.get("voice", ""),
@@ -241,6 +254,7 @@ def radio_reply(message: str, cars: list, player_idx: int, lap: int, track: dict
         result = provider.chat_json(
             RADIO_SYSTEM_PROMPT,
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            schema=RADIO_SCHEMA,
             max_tokens=60,
             temperature=0.3,
             timeout=20,

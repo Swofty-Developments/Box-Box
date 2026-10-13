@@ -6,7 +6,7 @@ Box-Box is an AI-powered race engineer for home sim racing. It captures real-tim
 
 - Listens for live **F1 24** and **F1 25** UDP telemetry and **Gran Turismo 7** JSON telemetry.
 - Models tires, fuel, ERS, weather, and nearby opponents before the strategy call.
-- Asks DeepSeek or Cerebras for pit-wall advice on a timed interval and speaks it with ElevenLabs.
+- Asks DeepSeek, Cerebras, or Claude for pit-wall advice on a timed interval and speaks it with ElevenLabs.
 - Lets the driver talk back on pit radio. The engineer answers in text and voice.
 - Shows a live dashboard: standings, track map, selected-car data, and the radio log.
 - Falls back to a 22-car simulator when a game is not connected.
@@ -21,7 +21,7 @@ venv\Scripts\pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Put your AI provider key (DeepSeek or Cerebras) and your ElevenLabs key in `.env`, then start the server and the simulator:
+Put your AI provider key (DeepSeek, Cerebras, or Anthropic) and your ElevenLabs key in `.env`, then start the server and the simulator:
 
 ```bat
 start.bat
@@ -58,7 +58,7 @@ Copy `.env.example` to `.env`.
 
 | Variable | Purpose |
 | --- | --- |
-| `AI_PROVIDER` | `deepseek` or `cerebras`. Defaults to `deepseek` |
+| `AI_PROVIDER` | `deepseek`, `cerebras` or `claude`. Defaults to `deepseek` |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_MODEL` | DeepSeek model. Defaults to `deepseek-v4-flash` |
 | `DEEPSEEK_REASONING_EFFORT` | `none` (thinking off), `low`, `high` or `max`. Defaults to `low` |
@@ -66,6 +66,10 @@ Copy `.env.example` to `.env`.
 | `CEREBRAS_API_KEY` | Cerebras API key |
 | `CEREBRAS_MODEL` | Cerebras model. Defaults to `qwen-3.8-27b` |
 | `CEREBRAS_REASONING_EFFORT` | `none`, `low`, `medium` or `high`. Defaults to `none`; `gpt-oss-120b` needs `low` or higher |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `ANTHROPIC_WORKSPACE_ID` | Workspace for keys that are not scoped to one |
+| `ANTHROPIC_MODEL` | Claude model. Defaults to `claude-haiku-5-5` |
+| `ANTHROPIC_REASONING_EFFORT` | `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `low` |
 | `ELEVENLABS_API_KEY` | ElevenLabs key used for pit-radio voice |
 | `ELEVENLABS_VOICE_ID` | Spoken voice. A default is used when this is empty |
 | `ELEVENLABS_MODEL_ID` | Speech model. Defaults to `eleven_flash_v2_5` |
@@ -81,8 +85,9 @@ Copy `.env.example` to `.env`.
 | `server.py` | FastAPI app, UDP listeners, dashboard, and radio API |
 | `f1/parser.py` | F1 UDP packet parser for all 22 cars |
 | `f1/f1_24/`, `f1/f1_25/` | Per-game packet layouts, track ids, and compound ids |
-| `providers/base.py` | OpenAI-compatible chat call shared by every provider |
-| `providers/deepseek/`, `providers/cerebras/` | AI providers |
+| `providers/base.py` | Provider interface and registry |
+| `providers/openai_compatible.py` | Chat call shared by the OpenAI-compatible providers |
+| `providers/deepseek/`, `providers/cerebras/`, `providers/claude/` | AI providers |
 | `registry.py` | Name registry the F1 formats and AI providers register into |
 | `engine_models.py` | Tire, fuel, weather, and opponent models |
 | `analyzer.py` | Strategy and radio replies |

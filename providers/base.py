@@ -1,11 +1,7 @@
 """
-OpenAI-compatible chat backend shared by every AI provider.
-Each provider reads <PREFIX>_API_KEY, <PREFIX>_MODEL and <PREFIX>_BASE_URL from the environment.
+Shared shape of every AI provider. Each provider reads <PREFIX>_API_KEY and <PREFIX>_MODEL from the environment.
 """
-import json
 import os
-
-from openai import OpenAI
 
 from registry import Registry
 
@@ -15,47 +11,19 @@ PROVIDERS = Registry("AI provider")
 class Provider:
     label = ""
     env_prefix = ""
-    base_url = ""
     model = ""
 
     def __init__(self):
-        api_key = os.getenv(f"{self.env_prefix}_API_KEY", "")
-        if not api_key:
+        self.api_key = os.getenv(f"{self.env_prefix}_API_KEY", "")
+        if not self.api_key:
             raise ValueError(f"{self.label} needs {self.env_prefix}_API_KEY in .env")
         self.model = os.getenv(f"{self.env_prefix}_MODEL") or self.model
-        # A retried answer lands after the race has moved on; the next analysis is at most one interval away
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=os.getenv(f"{self.env_prefix}_BASE_URL") or self.base_url,
-            max_retries=0,
-        )
 
     @property
     def reasoning(self) -> bool:
         return False
 
-    def request_options(self) -> dict:
-        return {}
-
-    def chat_json(self, system: str, user: str, max_tokens: int | None = None,
+    def chat_json(self, system: str, user: str, schema: dict | None = None, max_tokens: int | None = None,
                   temperature: float | None = None, timeout: float = 60) -> dict:
-        kwargs = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "response_format": {"type": "json_object"},
-            "timeout": timeout,
-            **self.request_options(),
-        }
-        # Reasoning tokens count against max_tokens, so a short cap leaves nothing for the answer
-        if max_tokens and not self.reasoning:
-            kwargs["max_tokens"] = max_tokens
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        resp = self.client.chat.completions.create(**kwargs)
-        choice = resp.choices[0]
-        if not choice.message.content:
-            raise ValueError(f"{self.label} returned no answer (finish_reason={choice.finish_reason})")
-        return json.loads(choice.message.content)
+        """Return the model's reply as a dict; schema is enforced where the provider supports it."""
+        raise NotImplementedError

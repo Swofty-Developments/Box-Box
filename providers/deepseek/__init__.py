@@ -4,13 +4,14 @@ The API default is high; this provider defaults to low.
 """
 import os
 
-from ..base import PROVIDERS, Provider
+from ..base import PROVIDERS
+from ..openai_compatible import OpenAICompatibleProvider
 
 REASONING_EFFORTS = ("none", "low", "high", "max")
 
 
 @PROVIDERS.register("deepseek")
-class DeepSeek(Provider):
+class DeepSeek(OpenAICompatibleProvider):
     label = "DeepSeek"
     env_prefix = "DEEPSEEK"
     base_url = "https://api.deepseek.com"

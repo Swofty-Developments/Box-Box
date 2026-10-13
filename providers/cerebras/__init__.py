@@ -4,11 +4,12 @@ gpt-oss-120b accepts low, medium and high only.
 """
 import os
 
-from ..base import PROVIDERS, Provider
+from ..base import PROVIDERS
+from ..openai_compatible import OpenAICompatibleProvider
 
 
 @PROVIDERS.register("cerebras")
-class Cerebras(Provider):
+class Cerebras(OpenAICompatibleProvider):
     label = "Cerebras"
     env_prefix = "CEREBRAS"
     base_url = "https://api.cerebras.ai/v1"
