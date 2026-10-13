@@ -1,23 +1,21 @@
 """
-F1 UDP parser — all 22 cars (official PacketHeader / payload layout).
-Layouts that differ between games come from the formats registered in f1/f1_XX.
+F1 UDP parser — every car in the session (official PacketHeader / payload layout).
+Car counts and layouts that differ between games come from the formats registered in f1/f1_XX.
 """
 import math
 import struct
 
 from .formats import FORMATS
 
-# F1 23/24/25 header: format, year, maj, min, packetVer, packetId, sessionUID, ...
+# 2024-2026 header: format, year, maj, min, packetVer, packetId, sessionUID, ...
 HEADER_FMT = struct.Struct("<HBBBBBQfIIBB")
 HEADER_SIZE = HEADER_FMT.size  # 29
 
-MOTION_CAR_FMT = struct.Struct("<3f3f6h6f")  # 60 bytes
-MOTION_CAR_SIZE = MOTION_CAR_FMT.size
+# CarMotionData: world position X/Z and forward direction X/Z (int16, normalised)
+MOTION_POSITION_FMT = struct.Struct("<3f")
+MOTION_FORWARD_OFFSET = 24
+MOTION_FORWARD_FMT = struct.Struct("<3h")
 
-CAR_TELE_FMT = struct.Struct("<HfffBbHBBH4H4B4BH4f4B")  # 60 bytes
-CAR_TELE_SIZE = CAR_TELE_FMT.size
-
-CAR_STATUS_CAR_SIZE = 55
 CAR_STATUS_FUEL_OFFSET = 5
 CAR_STATUS_FUEL_LAPS_OFFSET = 13  # m_fuelRemainingLaps (MFD value)
 CAR_STATUS_COMPOUND_OFFSET = 25  # m_actualTyreCompound
@@ -32,7 +30,7 @@ CAR_DMG_TYRE_DAMAGE_OFFSET = 16  # uint8[4] after the wear floats
 CAR_DMG_BODY_AFTER_WING = 2
 CAR_DMG_BODY_COUNT = 4
 
-# Session payload offsets (identical in 2024 and 2025)
+# Session payload offsets (identical in 2024-2026; 2026 only appends after them)
 SESSION_TOTAL_LAPS_OFFSET = 3
 SESSION_TRACK_LENGTH_OFFSET = 4  # uint16
 SESSION_TYPE_OFFSET = 6
@@ -43,10 +41,6 @@ SESSION_FORECAST_OFFSET = 127
 SESSION_PIT_WINDOW_OFFSET = 653  # ideal lap, latest lap, rejoin position
 FORECAST_SAMPLE_FMT = struct.Struct("<BBBbbbbB")  # 8 bytes
 FORECAST_MAX_SAMPLES = 64
-
-# ParticipantData: aiControlled, driverId, networkId, teamId, myTeam, raceNumber, nationality, name
-PARTICIPANT_TEAM_OFFSET = 3
-PARTICIPANT_MY_TEAM_OFFSET = 4
 
 # LapData offsets past the deltas
 LAP_POSITION_OFFSET = 32
@@ -89,6 +83,7 @@ RETIREMENT_REASONS = {
   5: "not enough laps completed", 6: "black flagged", 7: "red flagged",
   8: "mechanical failure", 9: "session skipped", 10: "session simulated",
 }
+COLLISION_SEVERITIES = {0: "low", 1: "medium", 2: "high"}
 PENALTY_TYPES = {
   0: "drive through", 1: "stop go", 2: "grid penalty", 3: "penalty reminder",
   4: "time penalty", 5: "warning", 6: "disqualified", 7: "removed from formation lap",
@@ -98,7 +93,7 @@ PENALTY_TYPES = {
   15: "this and previous lap invalidated without reason", 16: "retired", 17: "black flag timer",
 }
 
-# LapData is 57 bytes in 2024 and 2025 (lastLap/currentLap are uint32 ms)
+# LapData is 57 bytes in 2024-2026 (lastLap/currentLap are uint32 ms)
 LAP_DATA_CAR_SIZE = 57
 
 # Wheel arrays in every packet are ordered RL, RR, FL, FR
@@ -199,15 +194,17 @@ class F1Accumulator:
     return fmt
 
   def _parse_motion(self, data):
-    for i in range(22):
-      offset = HEADER_SIZE + i * MOTION_CAR_SIZE
-      if offset + MOTION_CAR_SIZE > len(data):
+    size = self.format.motion.size
+    for i in range(self.format.num_cars):
+      offset = HEADER_SIZE + i * size
+      if offset + size > len(data):
         break
-      raw = MOTION_CAR_FMT.unpack_from(data, offset)
+      x, _, z = MOTION_POSITION_FMT.unpack_from(data, offset)
+      fwd_x, _, fwd_z = MOTION_FORWARD_FMT.unpack_from(data, offset + MOTION_FORWARD_OFFSET)
       car = self.cars.setdefault(i, {})
-      car["x"] = round(raw[0], 1)
-      car["z"] = round(raw[2], 1)
-      fx, fz = raw[6] / 32767.0, raw[8] / 32767.0
+      car["x"] = round(x, 1)
+      car["z"] = round(z, 1)
+      fx, fz = fwd_x / 32767.0, fwd_z / 32767.0
       car["heading"] = round((math.degrees(math.atan2(fx, fz)) + 360) % 360, 1)
 
   def _parse_session(self, data):
@@ -243,7 +240,7 @@ class F1Accumulator:
       self.pit_window = {"idealLap": ideal, "latestLap": latest, "rejoinPosition": rejoin}
 
   def _parse_lap_data(self, data):
-    for i in range(22):
+    for i in range(self.format.num_cars):
       offset = HEADER_SIZE + i * LAP_DATA_CAR_SIZE
       if offset + LAP_DATA_CAR_SIZE > len(data):
         break
@@ -297,23 +294,23 @@ class F1Accumulator:
   def _parse_participants(self, data):
     if len(data) < HEADER_SIZE + 1:
       return
-    size = self.format.participant_size
-    name_len = self.format.name_len
-    for i in range(22):
-      offset = HEADER_SIZE + 1 + i * size
-      if offset + size > len(data):
+    layout = self.format.participants
+    for i in range(self.format.num_cars):
+      offset = HEADER_SIZE + 1 + i * layout.size
+      if offset + layout.size > len(data):
         break
-      team_id = data[offset + PARTICIPANT_TEAM_OFFSET]
-      race_number = data[offset + 5]
-      raw_name = data[offset + 7: offset + 7 + name_len].split(b"\x00", 1)[0]
+      team_id = struct.unpack_from(layout.team_id, data, offset + layout.team_id_offset)[0]
+      race_number = data[offset + layout.race_number_offset]
+      name_start = offset + layout.name_offset
+      raw_name = data[name_start:name_start + layout.name_len].split(b"\x00", 1)[0]
       name = raw_name.decode("utf-8", errors="ignore").strip()
       car = self.cars.setdefault(i, {})
       car["raceNumber"] = race_number
       car["teamId"] = team_id
       car["team"] = self.format.teams.get(team_id, "")
-      car["myTeam"] = data[offset + PARTICIPANT_MY_TEAM_OFFSET] == 1
+      car["myTeam"] = data[offset + layout.my_team_offset] == 1
       car["liveryColour"] = ""
-      livery = self.format.participant_livery
+      livery = layout.livery_offset
       if livery is not None and data[offset + livery] >= 1:
         r, g, b = data[offset + livery + 1:offset + livery + 4]
         car["liveryColour"] = f"#{r:02X}{g:02X}{b:02X}"
@@ -321,11 +318,12 @@ class F1Accumulator:
         car["name"] = name
 
   def _parse_car_telemetry(self, data):
-    for i in range(22):
-      offset = HEADER_SIZE + i * CAR_TELE_SIZE
-      if offset + CAR_TELE_SIZE > len(data):
+    tele = self.format.telemetry.car
+    for i in range(self.format.num_cars):
+      offset = HEADER_SIZE + i * tele.size
+      if offset + tele.size > len(data):
         break
-      raw = CAR_TELE_FMT.unpack_from(data, offset)
+      raw = tele.unpack_from(data, offset)
       car = self.cars.setdefault(i, {})
       surface_temps = raw[14:18]
       inner_temps = raw[18:22]
@@ -343,9 +341,10 @@ class F1Accumulator:
       })
 
   def _parse_car_status(self, data):
-    for i in range(22):
-      offset = HEADER_SIZE + i * CAR_STATUS_CAR_SIZE
-      if offset + CAR_STATUS_CAR_SIZE > len(data):
+    size = self.format.status.size
+    for i in range(self.format.num_cars):
+      offset = HEADER_SIZE + i * size
+      if offset + size > len(data):
         continue
       car = self.cars.setdefault(i, {})
       fuel = struct.unpack_from("<f", data, offset + CAR_STATUS_FUEL_OFFSET)[0]
@@ -362,9 +361,9 @@ class F1Accumulator:
       car["ersBattery"] = round(max(0.0, min(100.0, (ers_j / ERS_MAX_J) * 100.0)), 1)
 
   def _parse_car_damage(self, data):
-    size = self.format.damage_size
-    wing = self.format.damage_front_wing
-    for i in range(22):
+    size = self.format.damage.size
+    wing = self.format.damage.front_wing
+    for i in range(self.format.num_cars):
       offset = HEADER_SIZE + i * size
       if offset + size > len(data):
         # accept slightly shorter if trailing fields missing
@@ -400,7 +399,7 @@ class F1Accumulator:
       event = {"code": "RED_FLAG", "car": -1, "detail": ""}
     elif code == "RTMT":
       reason = ""
-      if self.format.retirement_has_reason and len(detail) >= 2:
+      if self.format.events.retirement_reason and len(detail) >= 2:
         reason = RETIREMENT_REASONS.get(detail[1], "")
       event = {"code": "RETIREMENT", "car": detail[0], "detail": reason}
     elif code == "PENA" and len(detail) >= 7:
@@ -412,7 +411,10 @@ class F1Accumulator:
     elif code == "CHQF":
       event = {"code": "CHEQUERED_FLAG", "car": -1, "detail": ""}
     elif code == "COLL" and len(detail) >= 2:
-      event = {"code": "COLLISION", "car": detail[0], "detail": f"with {detail[1]}"}
+      text = f"with {detail[1]}"
+      if self.format.events.collision_severity and len(detail) >= 3:
+        text += f" ({COLLISION_SEVERITIES.get(detail[2], 'unknown')} severity)"
+      event = {"code": "COLLISION", "car": detail[0], "detail": text}
     if event:
       self.pending_events.append(event)
 

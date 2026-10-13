@@ -4,7 +4,7 @@ Box-Box is an AI-powered race engineer for home sim racing. It captures real-tim
 
 ## What it does
 
-- Listens for live **F1 24** and **F1 25** UDP telemetry and **Gran Turismo 7** JSON telemetry.
+- Listens for live **F1 24** and **F1 25** UDP telemetry, including the 2026 season pack's 24-car format, and **Gran Turismo 7** JSON telemetry.
 - Reads the safety car and VSC, flags, pit stops, race length, the rain forecast, damage, and every car's lap times.
 - Makes a strategy call after every lap, and immediately on a safety car, rain, damage, a puncture, a rival's stop, a retirement, or a driver request.
 - Works out the pit loss, where the driver would rejoin, and the race time of every 0, 1 and 2 stop plan before the AI decides.
@@ -48,9 +48,9 @@ In the game, open Settings → Telemetry:
 - UDP Broadcast / IP: this PC's LAN address, on the same network as the console
 - UDP Port: `20777`
 - UDP Send Rate: 20Hz or higher
-- UDP Format (F1 25): `2025` or `2024`
+- UDP Format (F1 25): `2026` for the 2026 season pack, `2025` or `2024`
 
-Enter a session on track. The menus only send event packets. Box-Box reads the format from each packet's header. Set `F1_UDP_FORMAT` to `2024` or `2025` to force one layout. Gran Turismo 7 telemetry is accepted as JSON on UDP port `33740`.
+Enter a session on track. The menus only send event packets. Box-Box reads the format from each packet's header. Set `F1_UDP_FORMAT` to `2024`, `2025` or `2026` to force one layout. Gran Turismo 7 telemetry is accepted as JSON on UDP port `33740`.
 
 ## Pit radio
 
@@ -139,7 +139,7 @@ Copy `.env.example` to `.env`.
 | `FISH_AUDIO_MODEL` | Fish Audio model. Defaults to `s2.1-pro`; accounts without API credit use `s2.1-pro-free` |
 | `FISH_AUDIO_LATENCY` | `low`, `balanced` or `normal`. Defaults to `normal` |
 | `F1_PORT` | F1 UDP port. Defaults to `20777` |
-| `F1_UDP_FORMAT` | `auto`, or a registered format: `2024` (F1 24), `2025` (F1 25). Defaults to `auto` |
+| `F1_UDP_FORMAT` | `auto`, or a registered format: `2024` (F1 24), `2025` (F1 25), `2026` (F1 25 2026 season pack). Defaults to `auto` |
 | `GT7_PORT` | GT7 UDP port. Defaults to `33740` |
 
 ## Layout
@@ -148,7 +148,7 @@ Copy `.env.example` to `.env`.
 | --- | --- |
 | `server.py` | FastAPI app, UDP listeners, dashboard, and radio API |
 | `f1/parser.py` | F1 UDP packet parser for all 22 cars |
-| `f1/f1_24/`, `f1/f1_25/` | Per-game packet layouts, track ids, and compound ids |
+| `f1/f1_24/`, `f1/f1_25/`, `f1/f1_26/` | Per-format packet layouts, car counts, track, team and compound ids |
 | `providers/base.py` | Provider interface and registry |
 | `providers/openai_compatible.py` | Chat call shared by the OpenAI-compatible providers |
 | `providers/deepseek/`, `providers/cerebras/`, `providers/claude/` | AI providers |

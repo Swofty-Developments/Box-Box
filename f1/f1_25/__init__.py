@@ -6,8 +6,10 @@ Changes from 2024 that the parser reads: participant names cut to 32 chars with
 car damage, a reason byte on the retirement event, the C6 compound, reverse
 track layouts and a new team list (the F2 '23 teams are gone).
 """
-from ..f1_24 import COMPOUNDS as F1_24_COMPOUNDS, F1_TEAMS, TRACKS as F1_24_TRACKS
-from ..formats import FORMATS, F1Format
+from ..f1_24 import (
+  COMPOUNDS as F1_24_COMPOUNDS, F1_TEAMS, MOTION, STATUS, TELEMETRY, TRACKS as F1_24_TRACKS,
+)
+from ..formats import FORMATS, DamageLayout, EventLayout, F1Format, ParticipantLayout
 
 TRACKS = {
   **F1_24_TRACKS,
@@ -27,15 +29,27 @@ TEAMS = {
   193: "McLaren '24", 194: "Sauber '24",
 }
 
+DAMAGE = DamageLayout(size=46, front_wing=28)
+
 F1_25 = FORMATS.add("2025", F1Format(
   packet_format=2025,
   game="F1 25",
-  participant_size=57,
-  name_len=32,
-  damage_size=46,
-  damage_front_wing=28,
-  retirement_has_reason=True,
-  participant_livery=44,  # after the 32-char name, telemetry flags, techLevel, platform
+  num_cars=22,
+  motion=MOTION,
+  participants=ParticipantLayout(
+    size=57,
+    team_id="B",
+    team_id_offset=3,
+    my_team_offset=4,
+    race_number_offset=5,
+    name_offset=7,
+    name_len=32,
+    livery_offset=44,  # after the 32-char name, telemetry flags, techLevel, platform
+  ),
+  telemetry=TELEMETRY,
+  status=STATUS,
+  damage=DAMAGE,
+  events=EventLayout(retirement_reason=True, collision_severity=False),
   tracks=TRACKS,
   compounds=COMPOUNDS,
   teams=TEAMS,
