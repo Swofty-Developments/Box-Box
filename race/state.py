@@ -184,14 +184,10 @@ class RaceState:
 
         if not self.is_race() or was_finished:
             return [], new_session
-        # The race is under way at lights out, or already running when Box-Box joins it
+        # The race is under way at lights out, or already running when Box-Box joins it. No call here:
+        # the start and lap 1 are the driver's busiest moments, so the first call is the end of lap 1
         if not self.started and self.player() and (self.lights_out or self.lap >= 2):
             self.started = True
-            detail = (
-                f"lights out seconds ago, lap 1 of {self.total_laps() or '?'}; too early to judge the start"
-                if self.lights_out else f"joined a race already on lap {self.lap} of {self.total_laps() or '?'}"
-            )
-            triggers.insert(0, Trigger("RACE_START", detail))
         return triggers, new_session
 
     def _update_safety_car(self, triggers: list):
@@ -253,8 +249,8 @@ class RaceState:
             elif real:
                 self._log(f"Penalty {self.name(car)}: {detail}")
         elif code == "COLLISION" and car == self.player_idx:
+            # Contact alone needs no call; damage it causes raises DAMAGE or PUNCTURE
             self._log(f"Contact {detail}")
-            triggers.append(Trigger("CONTACT", f"contact {detail}, check for damage"))
         elif code == "CHEQUERED_FLAG":
             self._log("Chequered flag")
         elif code == "LIGHTS_OUT":
@@ -290,7 +286,10 @@ class RaceState:
                     wear=_avg_wear(car),
                 )
                 if idx == self.player_idx and self.is_race():
-                    triggers.append(Trigger("LAP", f"lap {h.current_lap} complete", urgent=False))
+                    detail = f"lap {h.current_lap} complete"
+                    if h.current_lap == 1:
+                        detail += f", first lap done: started P{car.get('gridPosition') or '?'}, now P{car.get('position')}"
+                    triggers.append(Trigger("LAP", detail, urgent=False))
             h.current_lap = current_lap
             h.pitted_this_lap = h.neutralised_this_lap = h.wet_this_lap = False
 
