@@ -39,6 +39,9 @@ END_SILENCE_S = 0.9
 NO_SPEECH_S = 5.0
 MAX_S = 15.0
 CALIBRATE_S = 0.25
+# Transcription threads: onnxruntime otherwise takes every allowed core and spin-waits on them,
+# which makes a running game stutter
+THREADS = int(os.getenv("PTT_THREADS", "2"))
 
 
 def input_devices() -> list[tuple[str, str]]:
@@ -109,8 +112,17 @@ def tone(path: Path, freq: float, ms: int = 90):
 class Radio:
     def __init__(self, url: str, model_name: str):
         import onnx_asr
+        import onnxruntime
         self.url = url.rstrip("/")
-        self.model = onnx_asr.load_model(model_name, quantization="int8", providers=["CPUExecutionProvider"])
+        options = onnxruntime.SessionOptions()
+        options.intra_op_num_threads = THREADS
+        options.inter_op_num_threads = 1
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        # nixpkgs onnxruntime prefers OpenVINO, which fails on Parakeet
+        self.model = onnx_asr.load_model(
+            model_name, quantization="int8", sess_options=options, providers=["CPUExecutionProvider"]
+        )
         self.busy = False
         self.stop_now = threading.Event()
         cues = Path(tempfile.mkdtemp(prefix="boxbox-ptt-"))
