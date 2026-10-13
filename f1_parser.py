@@ -44,10 +44,10 @@ TRACK_NAMES = {
   0: "Melbourne", 1: "Paul Ricard", 2: "Shanghai", 3: "Bahrain",
   4: "Catalunya", 5: "Monaco", 6: "Montreal", 7: "Silverstone",
   8: "Hockenheim", 9: "Hungaroring", 10: "Spa", 11: "Monza",
-  12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "Red Bull Ring",
-  16: "Austin", 17: "Interlagos", 18: "Baku", 19: "Miami",
-  20: "Imola", 21: "Mexico City", 22: "Jeddah", 23: "Las Vegas",
-  24: "Losail", 25: "Zandvoort",
+  12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "Austin",
+  16: "Interlagos", 17: "Red Bull Ring", 19: "Mexico City", 20: "Baku",
+  26: "Zandvoort", 27: "Imola", 29: "Jeddah", 30: "Miami",
+  31: "Las Vegas", 32: "Losail",
 }
 
 # Packet IDs that update on-track car state enough to refresh the UI
