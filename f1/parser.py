@@ -93,6 +93,29 @@ PENALTY_TYPES = {
   15: "this and previous lap invalidated without reason", 16: "retired", 17: "black flag timer",
 }
 
+INFRINGEMENT_TYPES = {
+  0: "blocking by slow driving", 1: "blocking by wrong way driving", 2: "reversing off the start line",
+  3: "big collision", 4: "small collision", 5: "collision failed to hand back position",
+  6: "collision failed to hand back positions", 7: "corner cutting gained time",
+  8: "corner cutting overtake", 9: "corner cutting overtakes", 10: "crossed pit exit lane",
+  11: "ignoring blue flags", 12: "ignoring yellow flags", 13: "ignoring drive through",
+  14: "too many drive throughs", 15: "drive through reminder, serve within n laps",
+  16: "drive through reminder, serve this lap", 17: "pit lane speeding", 18: "parked for too long",
+  19: "ignoring tyre regulations", 20: "too many penalties", 21: "multiple warnings",
+  22: "approaching disqualification", 23: "tyre regulations select single",
+  24: "tyre regulations select multiple", 25: "lap invalidated corner cutting",
+  26: "lap invalidated running wide", 27: "ran wide gained time minor", 28: "ran wide gained time significant",
+  29: "ran wide gained time extreme", 30: "lap invalidated wall riding", 31: "lap invalidated flashback used",
+  32: "lap invalidated reset to track", 33: "blocking the pitlane", 34: "jump start",
+  35: "safety car to car collision", 36: "safety car illegal overtake", 37: "safety car exceeding allowed pace",
+  38: "virtual safety car exceeding allowed pace", 39: "formation lap below allowed speed",
+  40: "formation lap parking", 41: "retired mechanical failure", 42: "retired terminally damaged",
+  43: "safety car falling too far back", 44: "black flag timer", 45: "unserved stop go penalty",
+  46: "unserved drive through penalty", 47: "engine component change", 48: "gearbox change",
+  49: "parc ferme change", 50: "league grid penalty", 51: "retry penalty", 52: "illegal time gain",
+  53: "mandatory pitstop", 54: "attribute assigned",
+}
+
 # LapData is 57 bytes in 2024-2026 (lastLap/currentLap are uint32 ms)
 LAP_DATA_CAR_SIZE = 57
 
@@ -405,7 +428,8 @@ class F1Accumulator:
     elif code == "PENA" and len(detail) >= 7:
       # penaltyType, infringementType, vehicleIdx, otherVehicleIdx, time, lapNum, placesGained
       penalty = PENALTY_TYPES.get(detail[0], f"penalty {detail[0]}")
-      event = {"code": "PENALTY", "car": detail[2], "detail": f"{penalty} {detail[4]}s lap {detail[5]}"}
+      reason = INFRINGEMENT_TYPES.get(detail[1], f"infringement {detail[1]}")
+      event = {"code": "PENALTY", "car": detail[2], "detail": f"{penalty} ({reason}) {detail[4]}s lap {detail[5]}"}
     elif code == "TMPT":
       event = {"code": "TEAMMATE_PIT", "car": detail[0], "detail": ""}
     elif code == "CHQF":

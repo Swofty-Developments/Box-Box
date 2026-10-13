@@ -17,6 +17,8 @@ RIVAL_GAP_S = 4.0
 WING_DAMAGE_STEP = 15
 BODY_DAMAGE_STEP = 20
 PUNCTURE_DAMAGE = 50
+# Penalty events that cost time or places; the game sends warnings and lap invalidations as penalty events too
+REAL_PENALTIES = ("drive through", "stop go", "grid penalty", "time penalty", "disqualified", "black flag timer")
 # Forecast rain that is worth warning about: this likely, this soon
 FORECAST_RAIN_PCT = 40
 FORECAST_WINDOW_MIN = 10
@@ -228,9 +230,18 @@ class RaceState:
             self._log(f"{self.name(car)} retired {detail}".strip())
             triggers.append(Trigger("RETIREMENT", f"{self.name(car)} retired, watch for a safety car"))
         elif code == "PENALTY":
-            self._log(f"Penalty {self.name(car)}: {detail}")
+            real = detail.startswith(REAL_PENALTIES)
             if car == self.player_idx:
-                triggers.append(Trigger("PENALTY", detail))
+                if real:
+                    self._log(f"PENALTY for you: {detail}")
+                    triggers.append(Trigger("PENALTY", detail))
+                elif detail.startswith("warning"):
+                    self._log(f"Warning for you, not a penalty: {detail}")
+                    triggers.append(Trigger("WARNING", f"{detail}; a warning, not a penalty", urgent=False))
+                else:
+                    self._log(f"Note for you, not a penalty: {detail}")
+            elif real:
+                self._log(f"Penalty {self.name(car)}: {detail}")
         elif code == "COLLISION" and car == self.player_idx:
             self._log(f"Contact {detail}")
             triggers.append(Trigger("CONTACT", f"contact {detail}, check for damage"))
