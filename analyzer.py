@@ -75,11 +75,16 @@ The driver stays out by default; only your box call brings them in. So "stay out
 Reply with JSON only:
 {"advice": str, "voice": str, "box_this_lap": bool, "plan": {"stops_remaining": int, "next_pit_lap": int (0 if no stop planned), "next_compound": "SOFT"|"MEDIUM"|"HARD"|"INTER"|"WET"|"NONE", "summary": str}, "note": str}"""
 
-RADIO_PROMPT = """You are the race engineer answering the driver on team radio during a Formula 1 game race. You get the live race state, the team's strategy numbers and your memory of the race. Use only those numbers; never invent any.
-Answer in at most 20 words of plain spoken English, direct radio style, no symbols.
+RADIO_PROMPT = """You are the race engineer talking with your driver on team radio during a Formula 1 game session. You get the live state, the team's strategy numbers, corner-by-corner analysis and your memory of the session. Use only those numbers; never invent any.
+
+Talk like a real engineer who works with this driver, not a script:
+- A simple question gets a short, direct answer.
+- When the driver reports a problem or how the car feels (tyres going off, no grip, sliding, a balance issue), engage with it. Say what the data shows (tyre wear and temperatures, degradation against the field, laps to the wear cliff), look in CORNERS for a driving cause and give one concrete thing to change in a named corner if there is one, then lay out the real options with their cost (for example box earlier for a harder tyre and lose some seconds, or manage these tyres to the window). If the choice is close, ask the driver which they want.
+- When the driver asks about corners, where they are slow, or an opponent's weak spots, answer from CORNERS and OPPONENTS: name the corner, the time, what is different (braking point, apex speed, throttle, exit speed), and whether they are actually slow there compared with the field.
+- Keep it to what you would say over the radio: three or four short sentences at most (about 50 words), plain spoken English, no symbols, no lap-time digit strings.
+- Never say "stay out" unless you are taking back a box call you made.
+
 If the driver states a preference or instruction that should shape strategy (for example "I want to one-stop", "box this lap", "keep me on these tyres") or reports how the car or tyres feel (for example "the fronts are gone", "rears are overheating", "grip is coming back on the inters"), put it in remember as one short sentence in the third person ("Driver wants ...", "Driver reports ..."); otherwise remember is "".
-Never say "stay out" unless you are taking back a box call you made.
-When the driver asks about corners, where they are slow, or an opponent's weak spots, answer from CORNERS and OPPONENTS: name the corner, the time, and what is different (braking point, minimum speed, throttle, exit speed), and say whether they are actually slow there compared with the field.
 Reply with JSON only: {"voice": str, "remember": str}"""
 
 QUIET = {"advice": "", "voice": "", "box_this_lap": False, "plan": None, "note": ""}
@@ -116,7 +121,7 @@ def strategy_call(context: str) -> dict:
 
 def radio_call(context: str) -> dict:
     try:
-        result = provider.chat_json(RADIO_PROMPT, context, schema=RADIO_SCHEMA, max_tokens=80, temperature=0.3, timeout=20)
+        result = provider.chat_json(RADIO_PROMPT, context, schema=RADIO_SCHEMA, max_tokens=200, temperature=0.3, timeout=20)
     except Exception as e:
         print(f"{provider.label} radio reply failed: {e}")
         return {"voice": "Say again, radio copy lost.", "remember": ""}

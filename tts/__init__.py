@@ -20,8 +20,8 @@ TTS_PROVIDERS.discover(__name__, __path__)
 AUDIO_DIR = Path(__file__).resolve().parent.parent / "static" / "audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 CLEANUP_MAX_AGE = int(os.getenv("TTS_CLEANUP_MAX_AGE", "3600"))
-# Long lines take longer to synthesise and to play
-MAX_CHARS = 180
+# A safety cap well above a radio answer's length; longer text is cut at a word
+MAX_CHARS = 600
 
 provider: TtsProvider = TTS_PROVIDERS.get(os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower())()
 
