@@ -345,7 +345,8 @@ class RaceState:
                     at=self.time,
                 )
                 if idx == self.player_idx and self.is_race():
-                    detail = f"lap {h.current_lap} complete"
+                    detail = (f"lap {h.current_lap} complete, now on lap {current_lap}: "
+                              f"box_this_lap true brings the car in at the end of lap {current_lap}")
                     if h.current_lap == 1:
                         detail += f", first lap done: started P{car.get('gridPosition') or '?'}, now P{car.get('position')}"
                     triggers.append(Trigger("LAP", detail, urgent=False))
