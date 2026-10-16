@@ -484,6 +484,7 @@ class RaceSim:
     events, self.events = self.events, []
     return {
       "sessionUid": self.session_uid,
+      "sessionTime": round(self.t, 3),
       "cars": cars,
       "track": self._track_dict(),
       "player_idx": self.player_idx,

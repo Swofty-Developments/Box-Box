@@ -21,6 +21,8 @@ BODY_DAMAGE_STEP = 20
 PUNCTURE_DAMAGE = 50
 # Penalty events that cost time or places; the game sends warnings and lap invalidations as penalty events too
 REAL_PENALTIES = ("drive through", "stop go", "grid penalty", "time penalty", "disqualified", "black flag timer")
+# The session clock running backwards by more than this is a flashback
+FLASHBACK_S = 0.5
 # Forecast rain that is worth warning about: this likely, this soon
 FORECAST_RAIN_PCT = 40
 FORECAST_WINDOW_MIN = 10
@@ -45,6 +47,7 @@ class LapRecord:
     neutralised: bool
     wet: bool
     wear: float | None
+    at: float = 0.0
 
 
 @dataclass
@@ -53,6 +56,7 @@ class Stint:
     visual: str
     start_lap: int
     end_lap: int | None = None
+    start_time: float = 0.0
 
 
 @dataclass
@@ -62,6 +66,7 @@ class CarHistory:
     laps: dict = field(default_factory=dict)
     stints: list = field(default_factory=list)
     pit_laps: list = field(default_factory=list)
+    pit_times: list = field(default_factory=list)
     current_lap: int = 0
     stops: int = 0
     pit_status: str = "NONE"
@@ -89,6 +94,18 @@ class CarHistory:
         return seen
 
 
+def with_undone_calls(trigger: Trigger, undone_calls: list) -> Trigger:
+    """Add the engineer's own calls that a flashback undid to the FLASHBACK call; an undone box call makes it urgent."""
+    said = [f'"{c["voice"] or c["plan"]}"' + (" (a box call)" if c["box"] else "") for c in undone_calls if c["voice"] or c["box"]]
+    if not said:
+        return trigger
+    return Trigger(
+        trigger.code,
+        f"{trigger.detail}; your calls after that point no longer apply: {'; '.join(said)}",
+        urgent=trigger.urgent or any(c["box"] for c in undone_calls),
+    )
+
+
 def _avg_wear(car: dict) -> float | None:
     wear = car.get("tireWear") or {}
     values = [v for v in wear.values() if isinstance(v, (int, float))]
@@ -106,6 +123,9 @@ class RaceState:
         self.cars = []
         self.player_idx = -1
         self.lap = 0
+        self.time = 0.0
+        self.flashbacks = 0
+        self.rewound_to = None
         self.histories = {}
         self.log = []
         self.safety_car = "NONE"
@@ -154,7 +174,7 @@ class RaceState:
         return bool(self.lap) and (frame.get("lap") or 0) < self.lap - 1
 
     def _log(self, text: str):
-        self.log.append({"lap": self.lap, "text": text})
+        self.log.append({"lap": self.lap, "time": self.time, "text": text})
 
     def name(self, idx: int) -> str:
         h = self.histories.get(idx)
@@ -170,9 +190,14 @@ class RaceState:
         self.track = frame.get("track") or {}
         self.cars = frame.get("cars") or []
         self.player_idx = frame.get("player_idx", -1)
-        self.lap = frame.get("lap") or 0
+        previous_lap, self.lap = self.lap, frame.get("lap") or 0
 
         triggers = []
+        now = frame.get("sessionTime")
+        if now is not None:
+            if not new_session and self.time and now < self.time - FLASHBACK_S:
+                triggers.append(self._rewind(float(now), previous_lap))
+            self.time = float(now)
         self._update_safety_car(triggers)
         self.corners.update(frame, self.safety_car)
         self._update_weather(triggers)
@@ -189,6 +214,39 @@ class RaceState:
         if not self.started and self.player() and (self.lights_out or self.lap >= 2):
             self.started = True
         return triggers, new_session
+
+    def _rewind(self, t: float, previous_lap: int) -> Trigger:
+        """Undo everything recorded after session time t, where the driver's flashback went back to."""
+        seconds = self.time - t
+        undone = [e["text"] for e in self.log if e.get("time", 0.0) > t]
+        self.log = [e for e in self.log if e.get("time", 0.0) <= t]
+        now = {c.get("idx"): c for c in self.cars}
+        for idx, h in self.histories.items():
+            h.laps = {k: v for k, v in h.laps.items() if v.at <= t}
+            while len(h.stints) > 1 and h.stints[-1].start_time > t:
+                h.stints.pop()
+            if h.stints:
+                h.stints[-1].end_lap = None
+            h.pit_times = [p for p in h.pit_times if p <= t]
+            h.pit_laps = h.pit_laps[:len(h.pit_times)]
+            car = now.get(idx) or {}
+            h.current_lap = car.get("currentLap") or h.current_lap
+            h.stops = car.get("numPitStops") or len(h.pit_laps)
+            h.pit_status = car.get("pitStatus") or "NONE"
+            h.pitted_this_lap = h.pit_status != "NONE"
+            h.neutralised_this_lap = h.wet_this_lap = False
+        self.corners.rewind(t)
+        self.flashbacks += 1
+        self.rewound_to = t
+        self.time = t
+        # Undone damage or a real penalty may have changed the plan; contact and warnings never raised a call
+        mine = [u for u in undone if u.startswith(("PLAYER", "PENALTY for you"))]
+        detail = (
+            f"the driver used a flashback, rewinding {seconds:.1f}s"
+            + (f" from lap {previous_lap} to lap {self.lap}" if previous_lap != self.lap else f" on lap {self.lap}")
+            + (f"; these never happened now: {'; '.join(undone)}" if undone else "")
+        )
+        return Trigger("FLASHBACK", detail, urgent=bool(mine))
 
     def _update_safety_car(self, triggers: list):
         sc = self.track.get("safetyCar") or "NONE"
@@ -267,7 +325,7 @@ class RaceState:
         visual = car.get("visualCompound") or compound
 
         if not h.stints:
-            h.stints.append(Stint(compound, visual, max(1, h.current_lap)))
+            h.stints.append(Stint(compound, visual, max(1, h.current_lap), start_time=self.time))
 
         # Close the previous lap with what earlier frames saw, before this frame marks the new lap
         current_lap = car.get("currentLap") or 0
@@ -284,6 +342,7 @@ class RaceState:
                     neutralised=h.neutralised_this_lap,
                     wet=h.wet_this_lap,
                     wear=_avg_wear(car),
+                    at=self.time,
                 )
                 if idx == self.player_idx and self.is_race():
                     detail = f"lap {h.current_lap} complete"
@@ -309,6 +368,7 @@ class RaceState:
         if stops > h.stops:
             h.stops = stops
             h.pit_laps.append(car.get("currentLap") or self.lap)
+            h.pit_times.append(self.time)
         if h.pit_status != "NONE" and pit_status == "NONE":
             self._car_left_pits(car, h, triggers)
         elif not h.stints[-1].compound and compound:
@@ -340,7 +400,7 @@ class RaceState:
         visual = car.get("visualCompound") or compound
         if h.stints:
             h.stints[-1].end_lap = lap
-        h.stints.append(Stint(compound, visual, lap))
+        h.stints.append(Stint(compound, visual, lap, start_time=self.time))
         label = f"{visual} ({compound})" if visual and visual != compound else compound
         self._log(f"{h.name} pitted, rejoined P{car.get('position')} on {label}")
         mate = self.teammate()

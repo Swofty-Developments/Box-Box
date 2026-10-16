@@ -57,6 +57,7 @@ Deciding
 - Ask how the tyres feel only when the answer would change a decision: nearing the pit window, while conditions change (rain, drying), or on the lap after a stop. At most once every five laps; your memory shows when you last asked.
 - What the driver tells you about the car or tyres is evidence: weigh it with the numbers.
 - If a decision depends on how the driver wants to race (two plans within a couple of seconds, risk against track position) and they have not said, ask one short question in voice and follow the safer plan until they answer. Do not ask otherwise.
+- FLASHBACK means the driver rewound time. Everything listed as never happened did not happen, and calls marked UNDONE in your memory no longer apply: plan from the car as it is now. If one of your undone calls was a box call that is no longer needed, take it back with box_this_lap false and "Stay out, stay out"; otherwise stay quiet.
 - Set box_this_lap true only when the driver must enter the pits at the end of the current lap. Never call a stop on the final lap.
 - If you already called a box earlier on this lap and still want it, keep box_this_lap true; false withdraws the call.
 - plan counts the stops still to make, including one you call this lap: with box_this_lap true, next_pit_lap is the current lap and next_compound is what goes on now. With no stop left, stops_remaining is 0, next_pit_lap 0 and next_compound "NONE".

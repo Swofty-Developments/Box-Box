@@ -34,10 +34,10 @@ SLOW_KPH, FAST_KPH = 120, 200
 
 
 class LapTrace:
-    __slots__ = ("idx", "lap", "time", "dist", "speed", "throttle", "brake", "gear", "x", "z")
+    __slots__ = ("idx", "lap", "time", "finished_at", "dist", "speed", "throttle", "brake", "gear", "x", "z")
 
-    def __init__(self, idx, lap, time, samples):
-        self.idx, self.lap, self.time = idx, lap, time
+    def __init__(self, idx, lap, time, finished_at, samples):
+        self.idx, self.lap, self.time, self.finished_at = idx, lap, time, finished_at
         self.dist, self.speed, self.throttle, self.brake, self.gear, self.x, self.z = (list(c) for c in zip(*samples))
 
     def at(self, series: list, d: float) -> float:
@@ -87,8 +87,17 @@ class CornerAnalysis:
         track = frame.get("track") or {}
         if track.get("id") != self.track_id or (track.get("trackLength") and not self.length):
             self.reset(track.get("id"), track.get("trackLength") or 0)
+        self.now = float(frame.get("sessionTime") or 0.0)
         for car in frame.get("cars") or []:
             self._sample(car, safety_car)
+
+    def rewind(self, t: float):
+        """A flashback: laps finished after t never happened, and every lap in progress is now a mix of two runs."""
+        for idx, laps in self.laps.items():
+            laps[:] = [l for l in laps if l.finished_at <= t]
+        for rec in self.recorders.values():
+            rec.spoiled = True
+        self.version += 1
 
     def _sample(self, car: dict, safety_car: str):
         idx = car.get("idx")
@@ -118,7 +127,7 @@ class CornerAnalysis:
         if any(b[0] - a[0] > MAX_HOLE_M for a, b in zip(s, s[1:])):
             return
         laps = self.laps.setdefault(idx, [])
-        laps.append(LapTrace(idx, rec.lap, lap_time, s))
+        laps.append(LapTrace(idx, rec.lap, lap_time, getattr(self, "now", 0.0), s))
         del laps[:-LAPS_KEPT]
         self.version += 1
 

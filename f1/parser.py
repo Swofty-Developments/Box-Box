@@ -171,6 +171,7 @@ class F1Accumulator:
     if session_uid != self.session_uid and header[6]:
       self._reset()
     self.session_uid = session_uid
+    self.session_time = header[7]
     if player_idx is None:
       player_idx = header[10]
     self.player_idx = player_idx
@@ -504,6 +505,7 @@ class F1Accumulator:
 
     return {
       "sessionUid": self.session_uid,
+      "sessionTime": round(self.session_time, 3),
       "cars": all_cars,
       "track": {
         "id": self.track_id,

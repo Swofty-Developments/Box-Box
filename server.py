@@ -15,7 +15,7 @@ import tts
 from tts import synthesize
 import captions
 from f1 import F1Accumulator
-from race import EngineerMemory, RaceState, Trigger, radio_context, strategy_context
+from race import EngineerMemory, RaceState, Trigger, radio_context, strategy_context, with_undone_calls
 from race.teams import caption_style
 
 load_dotenv()
@@ -167,14 +167,16 @@ async def _strategy_loop():
     while any(t.urgent or t.code == "LAP" for t in _pending):
       reasons, _pending = _pending, []
       session, lap = race_state.session_uid, race_state.lap
+      flashbacks, called_at = race_state.flashbacks, race_state.time
       context = strategy_context(race_state, memory, reasons)
       started = time.time()
       result = await asyncio.to_thread(strategy_call, context)
-      if race_state.session_uid != session:
+      # A new session or a flashback while the call ran makes its answer stale
+      if race_state.session_uid != session or race_state.flashbacks != flashbacks:
         continue
       if ((race_state.player() or {}).get("pitStatus") or "NONE") != "NONE":
         result["box_this_lap"] = False
-      memory.record_call(lap, reasons, result)
+      memory.record_call(lap, reasons, result, called_at)
       if result["advice"]:
         _last_advice = result["advice"]
       audio_url = await _speak(result["voice"]) if result["voice"] else None
@@ -217,6 +219,14 @@ async def process_frame(data: dict, source: str):
     _pending.clear()
     _last_advice = ""
     tts.stop()
+
+  flashback = next((t for t in triggers if t.code == "FLASHBACK"), None)
+  if flashback:
+    tts.stop()
+    _pending.clear()
+    undone = memory.rewind(race_state.rewound_to)
+    triggers = [with_undone_calls(t, undone) if t is flashback else t for t in triggers]
+    print(f"Flashback to {race_state.rewound_to:.1f}s: {len(undone)} engineer call(s) undone")
     print(f"New session {race_state.session_uid or '(no id)'}: race memory cleared")
 
   await _broadcast({
