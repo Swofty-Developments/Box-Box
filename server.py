@@ -236,6 +236,7 @@ async def process_frame(data: dict, source: str):
     _pending.clear()
     _last_advice = ""
     tts.stop()
+    print(f"New session {race_state.session_uid or '(no id)'}: race memory cleared")
 
   flashback = next((t for t in triggers if t.code == "FLASHBACK"), None)
   if flashback:
@@ -244,7 +245,6 @@ async def process_frame(data: dict, source: str):
     undone = memory.rewind(race_state.rewound_to)
     triggers = [with_undone_calls(t, undone) if t is flashback else t for t in triggers]
     print(f"Flashback to {race_state.rewound_to:.1f}s: {len(undone)} engineer call(s) undone")
-    print(f"New session {race_state.session_uid or '(no id)'}: race memory cleared")
 
   await _broadcast({
     "advice": _last_advice,
