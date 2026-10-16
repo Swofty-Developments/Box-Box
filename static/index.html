@@ -102,6 +102,14 @@
       animation: pulse 1s infinite;
     }
     #ptt-btn.busy { opacity: 0.65; cursor: wait; }
+    #engineer-btn {
+      min-width: 130px; padding: 10px 16px; border: 1px solid #2a3a2a;
+      border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 0.4px;
+      background: #15301c; color: #81c784;
+    }
+    #engineer-btn:hover { border-color: #66bb6a; }
+    #engineer-btn.off { background: #2a1515; border-color: #5a2a2a; color: #ff8a80; }
+    #engineer-btn.off:hover { border-color: #ff5252; }
     .tag.soft { background: #5a1e1e; color: #de6e6e; }
     .tag.medium { background: #5a3d1e; color: #de9e4e; }
     .tag.hard { background: #888; color: #eee; }
@@ -162,6 +170,7 @@
   <div id="engine-content"></div>
 </div>
 <div id="radio-bar">
+  <button id="engineer-btn" type="button" title="Switch the race engineer on or off: calls, radio, voice and captions">ENGINEER ON</button>
   <button id="ptt-btn" type="button" title="Click or press Space to toggle mic">MIC OFF</button>
   <div id="radio-log">Pit radio ready — ask about tyres, box, gaps, fuel…</div>
   <div id="radio-hint">Space = toggle mic</div>
@@ -758,13 +767,16 @@ function connect() {
 
   ws.onopen = () => {
     statusLeft.innerHTML = "F1 · <span class='ok'>Connected</span>";
+    loadEngineer();
   };
 
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
 
     if (!d.cars) {
-      if (d.type === "radio") {
+      if (d.type === "engineer") {
+        showEngineer(d.on);
+      } else if (d.type === "radio") {
         if (d.driver) setRadioLog(d.driver, d.advice || d.voice || "");
         if (d.advice) {
           alertBar.style.display = "block";
@@ -856,6 +868,37 @@ function connect() {
   ws.onerror = () => ws.close();
 }
 
+// ====== Engineer on/off ======
+const engineerBtn = $("engineer-btn");
+let engineerOn = true;
+function showEngineer(on) {
+  engineerOn = !!on;
+  engineerBtn.textContent = engineerOn ? "ENGINEER ON" : "ENGINEER OFF";
+  engineerBtn.classList.toggle("off", !engineerOn);
+  engineerBtn.setAttribute("aria-pressed", String(engineerOn));
+  if (!engineerOn) {
+    audioQueue = [];
+    player.pause();
+    isPlaying = false;
+  }
+}
+async function loadEngineer() {
+  try {
+    showEngineer((await (await fetch("/api/engineer")).json()).on);
+  } catch (e) {}
+}
+engineerBtn.addEventListener("click", async () => {
+  try {
+    const d = await (await fetch("/api/engineer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: !engineerOn }),
+    })).json();
+    showEngineer(d.on);
+  } catch (e) {}
+});
+loadEngineer();
+
 // ====== Engineer voice ======
 const voiceSelect = $("voice-select");
 async function loadVoices() {
@@ -922,7 +965,7 @@ async function sendToEngineer(text) {
   } catch (err) {
     console.error(err);
     window.__radioLocalPlay = false;
-    setRadioLog(msg, "Radio failed — try again");
+    setRadioLog(msg, engineerOn ? "Radio failed — try again" : "Engineer is switched off");
   } finally {
     pttBtn.classList.remove("busy", "listening");
     pttBtn.textContent = "MIC OFF";

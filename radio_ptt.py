@@ -3,6 +3,8 @@ Push-to-talk for the pit radio from any keyboard key or wheel button (Linux).
 
 Press the button once and talk: the channel closes when you stop talking (or on a second
 press), the speech is transcribed locally with Parakeet (onnx-asr) and sent to the engineer.
+Presses are ignored while the engineer is switched off on the page or the car is not on track,
+so the same button can still work the game's menus.
 
   python radio_ptt.py --learn     # press the button you want; prints PTT_DEVICE and PTT_CODE
   python radio_ptt.py             # listen for PTT_DEVICE / PTT_CODE from the environment
@@ -124,6 +126,7 @@ class Radio:
             model_name, quantization="int8", sess_options=options, providers=["CPUExecutionProvider"]
         )
         self.busy = False
+        self.closed_reason = None
         self.stop_now = threading.Event()
         cues = Path(tempfile.mkdtemp(prefix="boxbox-ptt-"))
         self.open_cue, self.close_cue = cues / "open.wav", cues / "close.wav"
@@ -133,10 +136,28 @@ class Radio:
     def cue(self, path: Path):
         subprocess.Popen(["pw-play", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    def closed(self) -> str | None:
+        """Why the channel stays shut right now, or None when the engineer is listening."""
+        try:
+            with urllib.request.urlopen(f"{self.url}/api/engineer", timeout=1) as resp:
+                status = json.loads(resp.read())
+        except Exception:
+            return "Box-Box is not running"
+        if not status.get("on"):
+            return "the engineer is switched off"
+        return None if status.get("listening") else "not on track"
+
     def pressed(self):
         if self.busy:
             self.stop_now.set()
             return
+        reason = self.closed()
+        if reason:
+            if reason != self.closed_reason:
+                print(f"Radio closed: {reason}", flush=True)
+            self.closed_reason = reason
+            return
+        self.closed_reason = None
         self.busy = True
         self.stop_now.clear()
         threading.Thread(target=self.transmit, daemon=True).start()

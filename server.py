@@ -31,6 +31,7 @@ UDP_DUMP = os.getenv("UDP_DUMP", "0") == "1"
 pit_radios = []
 _last_advice = ""
 _last_udp_time = 0.0
+_last_frame_time = 0.0
 _fallback = False
 race_state = RaceState()
 memory = EngineerMemory()
@@ -43,6 +44,18 @@ dump_dir = BASE_DIR / "udp_dump"
 _dump_count = 0
 
 f1_acc = F1Accumulator(F1_UDP_FORMAT)
+
+ENGINEER_FILE = BASE_DIR / "engineer.json"
+
+
+def _load_engineer_on() -> bool:
+  try:
+    return bool(json.loads(ENGINEER_FILE.read_text()).get("on", True))
+  except (OSError, ValueError):
+    return True
+
+
+_engineer_on = _load_engineer_on()
 
 
 class Gt7Protocol(asyncio.DatagramProtocol):
@@ -102,6 +115,7 @@ async def lifespan(_app):
   print(f"Voice: {tts.describe()}")
   await tts.provider.voices()
   print(f"Captions: {captions.describe()}")
+  print(f"Engineer: {'on' if _engineer_on else 'OFF (switch it on from the page)'}")
   print("=== F1 UDP setup ===")
   print(f"Listening F1 telemetry on UDP {UDP_HOST}:{F1_PORT} (format: {F1_UDP_FORMAT})")
   print("On PS5 F1 24 / F1 25 Settings → Telemetry:")
@@ -145,6 +159,8 @@ async def _broadcast(payload: dict):
 async def _speak(text: str) -> str | None:
   """Synthesize a line; returns the URL for the dashboard, or None when it plays on this machine."""
   url = await synthesize(text)
+  if not _engineer_on:
+    return None
   if url and tts.plays_locally():
     asyncio.create_task(tts.play(url))
     return None
@@ -172,7 +188,7 @@ async def _strategy_loop():
       started = time.time()
       result = await asyncio.to_thread(strategy_call, context)
       # A new session or a flashback while the call ran makes its answer stale
-      if race_state.session_uid != session or race_state.flashbacks != flashbacks:
+      if race_state.session_uid != session or race_state.flashbacks != flashbacks or not _engineer_on:
         continue
       if ((race_state.player() or {}).get("pitStatus") or "NONE") != "NONE":
         result["box_this_lap"] = False
@@ -180,7 +196,7 @@ async def _strategy_loop():
       if result["advice"]:
         _last_advice = result["advice"]
       audio_url = await _speak(result["voice"]) if result["voice"] else None
-      if result["voice"]:
+      if result["voice"] and _engineer_on:
         label, color = _caption_style()
         asyncio.create_task(captions.show(result["voice"], "strategy", lap, label, color))
       plan = result["plan"] or {}
@@ -202,7 +218,7 @@ async def _strategy_loop():
 
 
 async def process_frame(data: dict, source: str):
-  global _last_udp_time, _fallback, _last_advice
+  global _last_udp_time, _last_frame_time, _fallback, _last_advice
 
   if source == "udp":
     _last_udp_time = time.time()
@@ -213,6 +229,7 @@ async def process_frame(data: dict, source: str):
     if time.time() - _last_udp_time < UDP_TIMEOUT:
       return
 
+  _last_frame_time = time.time()
   triggers, new_session = race_state.update(data)
   if new_session:
     memory.reset_race()
@@ -240,7 +257,7 @@ async def process_frame(data: dict, source: str):
     "corners": race_state.corners.labels(),
   })
 
-  if triggers:
+  if triggers and _engineer_on:
     _submit(triggers)
 
 
@@ -264,10 +281,14 @@ async def api_radio(req: RadioRequest):
   text = (req.text or "").strip()
   if not text:
     return {"ok": False, "error": "empty message"}
+  if not _engineer_on:
+    return {"ok": False, "error": "the engineer is switched off"}
 
   corners = await asyncio.to_thread(race_state.corners.report, race_state.player_idx)
   context = radio_context(race_state, memory, text, corners)
   result = await asyncio.to_thread(radio_call, context)
+  if not _engineer_on:
+    return {"ok": False, "error": "the engineer is switched off"}
   voice = reply = result["voice"]
   memory.record_radio(race_state.lap, text, voice)
   if memory.add_preference(result["remember"]):
@@ -276,7 +297,8 @@ async def api_radio(req: RadioRequest):
                                  f'and voice stays "" unless the driver must act now')])
   audio_url = await _speak(voice) if voice else None
   label, color = _caption_style()
-  asyncio.create_task(captions.show(voice, "radio", race_state.lap, label, color))
+  if _engineer_on:
+    asyncio.create_task(captions.show(voice, "radio", race_state.lap, label, color))
 
   print(f"[RADIO] Driver: {text}")
   print(f"[RADIO] Engineer: {voice}" + (f" (remembered: {result['remember']})" if result["remember"] else ""))
@@ -304,6 +326,38 @@ def _caption_style() -> tuple[str, str]:
   return tts.provider.speaker_name() or label, color
 
 
+class EngineerRequest(BaseModel):
+  on: bool
+
+
+def _engineer_status() -> dict:
+  on_track = time.time() - _last_frame_time < 3.0
+  return {"on": _engineer_on, "on_track": on_track, "listening": _engineer_on and on_track}
+
+
+@app.get("/api/engineer")
+async def api_engineer():
+  return _engineer_status()
+
+
+@app.post("/api/engineer")
+async def api_engineer_set(req: EngineerRequest):
+  """Switch the whole engineer on or off: strategy calls, radio replies, voice and captions."""
+  global _engineer_on
+  _engineer_on = req.on
+  try:
+    ENGINEER_FILE.write_text(json.dumps({"on": _engineer_on}))
+  except OSError as e:
+    print(f"Could not save the engineer switch: {e}")
+  if not _engineer_on:
+    _pending.clear()
+    tts.stop()
+  print(f"Engineer switched {'on' if _engineer_on else 'off'}")
+  status = _engineer_status()
+  await _broadcast({"type": "engineer", **status})
+  return status
+
+
 class VoiceRequest(BaseModel):
   id: str
 
@@ -327,11 +381,13 @@ async def api_voice(req: VoiceRequest):
   if not audio_url:
     tts.provider.set_voice(previous)
     return {"ok": False, "error": f"{tts.provider.label} could not speak with voice {voice_id}"}
-  if tts.plays_locally():
-    asyncio.create_task(tts.play(audio_url))
+  if tts.plays_locally() or not _engineer_on:
+    if _engineer_on:
+      asyncio.create_task(tts.play(audio_url))
     audio_url = None
   label, color = _caption_style()
-  asyncio.create_task(captions.show(line, "radio", race_state.lap, label, color))
+  if _engineer_on:
+    asyncio.create_task(captions.show(line, "radio", race_state.lap, label, color))
   print(f"Voice switched to {label} ({voice_id})")
   return {"ok": True, "voice": voice_id, "name": label, "audio_url": audio_url}
 
