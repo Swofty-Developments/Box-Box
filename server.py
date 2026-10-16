@@ -272,8 +272,8 @@ async def api_radio(req: RadioRequest):
   memory.record_radio(race_state.lap, text, voice)
   if memory.add_preference(result["remember"]):
     if race_state.is_race() and race_state.started:
-      _submit([Trigger("DRIVER", f'{result["remember"]}; you already answered on the radio ("{voice}"), so '
-                                 f'voice stays "" unless the plan changes or the driver must act now')])
+      _submit([Trigger("DRIVER", f'{result["remember"]}; you already answered on the radio ("{voice}"): the plan must match that answer, '
+                                 f'and voice stays "" unless the driver must act now')])
   audio_url = await _speak(voice) if voice else None
   label, color = _caption_style()
   asyncio.create_task(captions.show(voice, "radio", race_state.lap, label, color))
