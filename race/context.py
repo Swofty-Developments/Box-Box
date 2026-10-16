@@ -203,6 +203,40 @@ def _pit_block(state, plan_result) -> list:
     return lines
 
 
+def _net_order(state) -> list:
+    """Where everyone ends up once the cars that still owe a stop have made it, at the green-flag pit loss."""
+    player = state.player()
+    if not player or player.get("gapToLeader") is None:
+        return []
+    if (player.get("pitStatus") or "NONE") != "NONE":
+        return ["NET ORDER ONCE EVERYONE HAS STOPPED: unknown while you are in the pit lane; ask again after the stop"]
+    green = pit.pit_loss(state.track.get("id", -1))
+    net, owing = [], []
+    for car in state.cars:
+        if not car.get("position") or (car.get("resultStatus") or "ACTIVE") not in ("ACTIVE", "FINISHED") or car.get("gapToLeader") is None:
+            continue
+        owes = _still_to_stop(state, car)
+        if owes:
+            owing.append(car)
+        net.append((car.get("gapToLeader") + (green if owes else 0.0), car))
+    net.sort(key=lambda x: x[0])
+    me = next((i for i, (_, c) in enumerate(net) if c.get("idx") == state.player_idx), None)
+    if me is None:
+        return []
+    mine = net[me][0]
+    ahead_now = [c for c in owing if (c.get("position") or 99) < (player.get("position") or 0)]
+    line = (f"NET ORDER ONCE EVERYONE HAS STOPPED (at the current gaps, {green}s green-flag pit loss added to each car that still has to stop"
+            + (", you included" if any(c.get("idx") == state.player_idx for c in owing) else "")
+            + f"; cars that stop later will be on fresher tyres): you P{me + 1} (now P{player.get('position')})")
+    if me > 0:
+        line += f", {net[me - 1][1].get('name')} {mine - net[me - 1][0]:.1f}s ahead of you then"
+    if me + 1 < len(net):
+        line += f", {net[me + 1][1].get('name')} {net[me + 1][0] - mine:.1f}s behind"
+    line += (f"; {len(ahead_now)} of the cars ahead of you now still have to stop"
+             + (f" ({', '.join(c.get('name') or '?' for c in sorted(ahead_now, key=lambda c: c.get('position')))})" if ahead_now else ""))
+    return [line]
+
+
 def _field(state) -> list:
     lines = ["FIELD (pos name gap-to-leader tyre stops last-lap status):"]
     for car in sorted(state.cars, key=lambda c: c.get("position") or 99):
@@ -241,6 +275,7 @@ def strategy_context(state, memory, reasons) -> str:
         *_neighbours(state),
         *_teammate(state),
         *_pit_block(state, plan_result),
+        *_net_order(state),
         *_field(state),
         *_race_log(state),
         "MEMORY:",
@@ -252,7 +287,7 @@ def strategy_context(state, memory, reasons) -> str:
 def radio_context(state, memory, message: str, corners: str = "") -> str:
     if state.is_race():
         now, green, _ = _loss_now(state)
-        strategy = _pit_block(state, planner.plan(state, now, green, memory.plan))
+        strategy = _pit_block(state, planner.plan(state, now, green, memory.plan)) + _net_order(state)
     else:
         strategy = [f"{state.track.get('sessionType') or 'This session'} is not a race: talk pace, tyres and the car, not race strategy."]
     sections = [
